@@ -55,6 +55,8 @@ DEFAULT_CONFIG = {
     # 文字描边：auto（背景透明时自动开）/ on（始终）/ off（关闭）
     # 默认 off —— 描边在某些背景上看着像重影，用户反馈过，默认关掉更干净
     'textOutline': 'off',
+    # 背景完全透明（勾上后背景 alpha = 0，滑块失效）
+    'bgTransparent': False,
     # 存储位置：空 = 用默认（主程序文件夹内）
     'configDir': '',
     'backupDir': '',

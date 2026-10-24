@@ -599,8 +599,16 @@ class Widget:
         self._paint_legacy(w, h, fs)
 
     def _alphas(self):
-        """(背景 alpha, 文字 alpha)，0-255"""
-        bg = int(max(0, min(100, float(self.cfg.get('bgAlpha', 100))))) * 255 // 100
+        """(背景 alpha, 文字 alpha)，0-255
+
+        ⚠️ 两条通道**彻底独立**：
+        - 背景 alpha 只由 bgAlpha 决定；勾了「背景透明」则直接为 0（完全透明）
+        - 文字 alpha 只由 textAlpha 决定，**完全不受背景影响**
+        """
+        if self.cfg.get('bgTransparent'):
+            bg = 0                      # 背景完全透明，文字照常
+        else:
+            bg = int(max(0, min(100, float(self.cfg.get('bgAlpha', 100))))) * 255 // 100
         tx = int(max(0, min(100, float(self.cfg.get('textAlpha', 100))))) * 255 // 100
         return bg, tx
 

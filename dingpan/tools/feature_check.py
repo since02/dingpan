@@ -396,10 +396,32 @@ def main():
             check('改名称字符数 → 立即生效',
                   app3.widget.cfg.get('nameChars') == 2,
                   'nameChars=%s' % app3.widget.cfg.get('nameChars'))
-            # 预览不应写盘
-            check('预览不会写入配置（只是内存里的效果）',
-                  app3.cfg.get('bgAlpha') == 100,
-                  'app.cfg bgAlpha=%s' % app3.cfg.get('bgAlpha'))
+            # v1.0.23 起：设置改完自动生效**并自动落盘**（不用点保存）
+            # 断言方式：改一个值 → 等防抖 → 磁盘上的值应跟着变
+            _want = 77
+            obj3._set_trackbar(obj3.sb_bg, _want, 20, 100)
+            obj3._apply_change()
+            pump(app3, 900)
+            check('设置改动已自动写入 app.cfg',
+                  app3.cfg.get('bgAlpha') == _want,
+                  'app.cfg bgAlpha=%s 期望=%s' % (app3.cfg.get('bgAlpha'), _want))
+            # 自动保存是防抖的：等定时器触发后配置文件里应能看到新值
+            pump(app3, 900)
+            try:
+                import os as _os
+                from dingpan import storage as _st
+                cfg_file = _os.path.join(_st.app_dir(), 'dingpan-config.json')
+                if _os.path.isfile(cfg_file):
+                    import json as _json
+                    with open(cfg_file, 'r', encoding='utf-8') as _f:
+                        disk = _json.load(_f)
+                    check('防抖后配置已落盘',
+                          disk.get('nameChars') == 2,
+                          'disk nameChars=%s' % disk.get('nameChars'))
+                else:
+                    check('防抖后配置已落盘', False, '配置文件不存在：%s' % cfg_file)
+            except Exception as e:  # noqa: BLE001
+                check('防抖后配置已落盘', False, str(e))
 
             print('\n=== 9. 涨跌颜色支持任意自定义 ===')
             items = obj3._combo_items(obj3.cb_up)

@@ -1,6 +1,7 @@
 # ---- 构建产物 ----
 dingpan/dist/
 build/
+dingpan/build_tmp/
 *.spec
 
 # build.py 从 tools/launcher_template.py 拷贝生成的入口

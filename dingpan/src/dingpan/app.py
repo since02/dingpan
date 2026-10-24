@@ -9,7 +9,7 @@ import time
 from ctypes import wintypes
 
 from . import win32 as w32
-from . import storage, quotes, legacy, icon
+from . import storage, quotes, icon
 from .win32 import gdi32, user32, shell32, kernel32
 from .widget import Widget, Theme, COLUMN_DEFS, COLUMN_MAP
 

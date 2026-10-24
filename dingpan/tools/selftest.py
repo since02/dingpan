@@ -15,12 +15,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 # test_config() 会真的写配置文件再复原，原来直接写用户的真实配置，
 # 每次跑自检都会把用户的自选/样式/显示开关重置成默认值。
 # 这里必须先切到临时目录，再 import storage（storage 在 import 时就记下了路径）。
-REAL_APPDATA = os.environ.get('APPDATA')      # 记下真实目录：原版配置导入要用
 os.environ['APPDATA'] = tempfile.mkdtemp(prefix='dpselftest_')
 # 程序目录也要隔离：配置默认写在程序目录内，不隔离会污染项目目录
 os.environ['DINGPAN_HOME'] = tempfile.mkdtemp(prefix='dphome_')
 
-from dingpan import quotes, storage, legacy  # noqa: E402
+from dingpan import quotes, storage  # noqa: E402
 
 results = []
 names = []
@@ -199,24 +198,6 @@ def test_backup():
         check('坏文件被拒绝', not ok, err)
 
 
-# ============================== 原版导入 ==============================
-def test_legacy():
-    print('\n=== 原版配置导入 ===')
-    # 原版配置装在**真实的** %APPDATA%\StockWidget 下，
-    # 而本脚本为了不碰用户配置隔离了 APPDATA → 这里显式指向真实目录。
-    p = legacy.find_legacy_config(REAL_APPDATA)
-    check('检测原版配置', bool(p), p or '未找到（%s）' % (REAL_APPDATA or 'APPDATA 未知'))
-    ok, cfg, count, path, err = legacy.import_legacy(REAL_APPDATA)
-    check('导入原版配置', ok, f'{count} 只' if ok else err)
-    if ok:
-        check('分组已建立', len(cfg['groups']) == 1 and cfg['groups'][0]['name'] == '原版自选')
-        check('自选数量一致', len(cfg['groups'][0]['stocks']) == count)
-        check('快捷键已转换', 'Ctrl' in cfg['hotkeys']['toggleVisible'],
-              cfg['hotkeys']['toggleVisible'])
-    for raw, want in [('Ctrl+Alt+F', 'Ctrl+Alt+F'), ('Ctrl+Shift+D', 'Ctrl+Shift+D')]:
-        check(f'快捷键归一化 {raw}', legacy.normalize_hotkey(raw) == want,
-              legacy.normalize_hotkey(raw))
-
 
 if __name__ == '__main__':
     print('盯盘 — 功能自检')
@@ -224,7 +205,6 @@ if __name__ == '__main__':
     test_config()
     test_webdav()
     test_backup()
-    test_legacy()
     passed = sum(1 for r in results if r)
     failed = [names[i] for i, r in enumerate(results) if not r]
     if failed:

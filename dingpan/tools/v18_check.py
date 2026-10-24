@@ -676,6 +676,82 @@ def main():
                                         'btn_cfg_dir', 'btn_bak_dir',
                                         'btn_reset_dirs')))
 
+    # ============ 10. v1.0.23：背景全透明 / 自动生效 / 删除 StockWidget ============
+    print('\\n=== 10. 背景全透明 / 设置自动生效 / StockWidget 已删除 ===')
+    # 10.1 背景完全透明：背景 alpha = 0，文字 alpha 不变
+    w = app.widget
+    wcfg = dict(app.cfg)
+    wcfg['theme'] = 'custom'; wcfg['customBg'] = '#ffffff'
+    wcfg['customText'] = '#000000'; wcfg['upColor'] = '#000000'
+    wcfg['downColor'] = '#000000'; wcfg['columns'] = ['name', 'price']
+    wcfg['bgAlpha'] = 100; wcfg['textAlpha'] = 100
+    wcfg['bgTransparent'] = False
+    prev = w.cfg
+    w.cfg = wcfg
+    check('未勾选时背景 alpha = 255', w._alphas()[0] == 255, str(w._alphas()))
+    check('未勾选时文字 alpha = 255', w._alphas()[1] == 255, str(w._alphas()))
+    wcfg['bgTransparent'] = True
+    w.cfg = wcfg
+    bg_a, tx_a = w._alphas()
+    check('勾选「背景透明」后背景 alpha = 0（完全透明）', bg_a == 0, str(bg_a))
+    check('勾选「背景透明」后文字 alpha 不受影响（仍 255）', tx_a == 255, str(tx_a))
+    wcfg['bgTransparent'] = False
+    w.cfg = wcfg
+    w.cfg = prev
+    # 10.2 复选框与滑块联动
+    obj._show_page(st.P_STYLE)
+    pump(app, 100)
+    check('样式页有「背景透明」复选框',
+          hasattr(obj, 'cb_bg_transparent'))
+    obj._set_check(obj.cb_bg_transparent, True)
+    obj._sync_bg_slider_enabled()
+    pump(app, 60)
+    check('勾选后背景滑块被禁用',
+          not user32.IsWindowEnabled(obj.sb_bg))
+    obj._set_check(obj.cb_bg_transparent, False)
+    obj._sync_bg_slider_enabled()
+    pump(app, 60)
+    check('取消勾选后背景滑块恢复可用',
+          user32.IsWindowEnabled(obj.sb_bg))
+    # 10.3 自动生效：改设置 → 自动落盘（不用点保存）
+    obj._show_page(st.P_STYLE)
+    pump(app, 80)
+    obj._set_trackbar(obj.sb_text, 66, 20, 100)
+    obj._apply_change()
+    pump(app, 900)
+    try:
+        import json as _json
+        _cfgf = os.path.join(_st.app_dir(), 'dingpan-config.json')
+        with open(_cfgf, 'r', encoding='utf-8') as _f:
+            _disk = _json.load(_f)
+        check('设置改动自动落盘（不用点保存）',
+              _disk.get('textAlpha') == 66,
+              'disk textAlpha=%s' % _disk.get('textAlpha'))
+    except Exception as e:  # noqa: BLE001
+        check('设置改动自动落盘（不用点保存）', False, str(e))
+    check('存在自动保存定时器机制', '_schedule_autosave' in src_set2)
+    # 10.4 StockWidget 相关已全部删除
+    _src_all = ''
+    for _f in os.listdir(os.path.join(ROOT, 'src', 'dingpan')):
+        if _f.endswith('.py'):
+            _src_all += io.open(os.path.join(ROOT, 'src', 'dingpan', _f),
+                                encoding='utf-8').read()
+    check('源码里没有 StockWidget 字样',
+          'StockWidget' not in _src_all and 'stockwidget' not in _src_all.lower())
+    check('legacy.py 模块已删除',
+          not os.path.isfile(os.path.join(ROOT, 'src', 'dingpan', 'legacy.py')))
+    check('设置页没有「从原版导入」控件',
+          not hasattr(obj, 'btn_legacy_detect')
+          and not hasattr(obj, 'btn_legacy_import'))
+    _tools_all = ''
+    for _f in os.listdir(os.path.join(ROOT, 'tools')):
+        # 排除本文件（断言里本身含这个词）
+        if _f.endswith('.py') and _f != 'v18_check.py':
+            _tools_all += io.open(os.path.join(ROOT, 'tools', _f),
+                                  encoding='utf-8').read()
+    check('测试里也没有 StockWidget 引用',
+          'StockWidget' not in _tools_all)
+
     # 兜底：确认源码里没有残留的旧字段页控件
     src = io.open(os.path.join(ROOT, 'src', 'dingpan', 'settings.py'),
                   encoding='utf-8').read()

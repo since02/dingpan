@@ -9,7 +9,7 @@ import time
 from ctypes import wintypes
 
 from . import win32 as w32
-from . import storage, quotes, legacy
+from . import storage, quotes
 from .win32 import gdi32, user32, kernel32
 from .widget import COLUMN_DEFS, COLUMN_MAP
 from . import dialogs
@@ -162,6 +162,9 @@ class SettingsWindow:
         self._stock_code = None
         self._capture = None        # 正在录制的快捷键行号
         self._auto_cid = 3000       # 自动分配的控件 ID 起点（避开所有手工 ID 段）
+        # 自动保存：所有设置改动后自动落盘（防抖，连续拖动只写最后一次）
+        self._autosave_timer = None
+        self._autosave_id = 0x53    # 定时器 ID（与其它消息区分）
         # 拖动排序状态：按列表角色分开（'stocks' 自选列表 / 'fields' 字段列表）
         self._drag_state = {'stocks': None, 'fields': None}
         # ⚠️ 自绘列表的选中行号存在**Python 侧**，不用原生 LB_SETCURSEL/LB_GETCURSEL：
@@ -313,7 +316,8 @@ class SettingsWindow:
             y += 34
 
         # 底部按钮（按客户区高度锚定，任何 DPI 下都不会被裁掉；WM_SIZE 里同口径重排）
-        self.btn_save = self._ctl(hinst, 'BUTTON', '保存设置', w32.BS_DEFPUSHBUTTON,
+        # 「设置已自动生效」，这个按钮是手动兜底（立即落盘 + 提示）
+        self.btn_save = self._ctl(hinst, 'BUTTON', '立即保存', w32.BS_DEFPUSHBUTTON,
                                   8, CLIENT_H - 68, SIDEBAR_W - 16, 30, cid=9001)
         self.btn_close = self._ctl(hinst, 'BUTTON', '关闭', w32.BS_PUSHBUTTON,
                                    8, CLIENT_H - 34, SIDEBAR_W - 16, 28, cid=9002)
@@ -519,34 +523,38 @@ class SettingsWindow:
         self._label(p, '背景颜色', x, y)
         self.btn_bg_color = self._ctl(hinst, 'BUTTON', '#1c1f28', w32.BS_PUSHBUTTON,
                                       x, y + 20, 110, 26, p, 9411)
-        y += 54
+        y += 48
 
         # 文字颜色
         self._label(p, '文字颜色', x, y)
         self.btn_text_color = self._ctl(hinst, 'BUTTON', '#e6e8ef', w32.BS_PUSHBUTTON,
                                         x, y + 20, 110, 26, p, 9412)
-        y += 54
+        y += 48
 
         # ---- 两个不透明度各自独占一行，逻辑彻底分开 ----
         # 一个只调背景色，一个只调文字；各自一行，不跟别的设置混排。
         self._label(p, '背景不透明度', x, y)
         self.sb_bg = self._ctl(hinst, 'msctls_trackbar32', '', 0x0001,
-                               x, y + 18, 300, 30, p)
-        self.lbl_bg = self._label(p, '', x + 308, y + 24)
-        y += 52
+                               x, y + 18, 220, 30, p)
+        self.lbl_bg = self._label(p, '', x + 226, y + 24)
+        # 「背景透明」勾上 → 背景完全透明，滑块失效
+        self.cb_bg_transparent = self._ctl(hinst, 'BUTTON', '背景透明',
+                                            w32.BS_AUTOCHECKBOX, x + 268, y + 20,
+                                            110, 24, p, 9804)
+        y += 46
 
         self._label(p, '文字不透明度', x, y)
         self.sb_text = self._ctl(hinst, 'msctls_trackbar32', '', 0x0001,
                                  x, y + 18, 300, 30, p)
         self.lbl_text = self._label(p, '', x + 308, y + 24)
-        y += 52
+        y += 46
 
         # 文字描边：默认关闭（描边在某些背景上看着像重影）
         self._label(p, '文字描边', x, y)
         self.cb_outline = self._ctl(hinst, 'COMBOBOX', '',
                                     w32.CBS_DROPDOWNLIST | 0x0001, x, y + 18, 110, 120, p)
         self._fill_combo(self.cb_outline, ['关闭（默认）', '自动（背景透明时开）', '始终开启'])
-        y += 60
+        y += 52
 
         # 字号：改用下拉框而不是滑块。
         # 原因：Windows trackbar 的**自动刻度会被稀疏化**（控件宽度相对取值跨度太窄时，
@@ -570,43 +578,41 @@ class SettingsWindow:
                                             '蓝 #3d7eff', '紫 #a855f7', '白 #ffffff'])
         self._fill_color_combo(self.cb_down, ['绿 #0ecb81', '青 #00b8d9', '蓝 #3d7eff',
                                               '紫 #a855f7', '红 #f6465d', '白 #ffffff'])
-        y += 64
-        # 显示方案：内置预设 + 用户自定义（保存 / 切换）
+        # ---- 显示方案（单栏，纵向间距已压缩以给底部提示留位置）----
+        y += 50
         self._label(p, '显示方案', x, y)
         self.cb_preset = self._ctl(hinst, 'COMBOBOX', '',
                                    w32.CBS_DROPDOWNLIST | 0x0001, x, y + 20, 210, 200, p)
         self.btn_preset_apply = self._ctl(hinst, 'BUTTON', '应用', w32.BS_PUSHBUTTON,
                                            x + 220, y + 20, 60, 26, p, 9421)
-        y += 56
+        y += 48
         self._label(p, '保存当前字段为自定义方案', x, y)
         self.ed_preset_name = self._ctl(hinst, 'EDIT', '', 0, x, y + 20, 210, 26, p)
         self.btn_preset_save = self._ctl(hinst, 'BUTTON', '保存', w32.BS_PUSHBUTTON,
                                           x + 220, y + 20, 60, 26, p, 9422)
         self.btn_preset_del = self._ctl(hinst, 'BUTTON', '删除', w32.BS_PUSHBUTTON,
                                          x + 286, y + 20, 60, 26, p, 9423)
-        y += 60
+        y += 50
         self.lbl_preset_msg = self._label(p, '', x, y)
-        y += 34
+        y += 24
+        # 提示：放**右栏**（左栏纵向空间不够了，右栏完全空着）
+        # ⚠️ 右栏起点要避开「背景透明」复选框（右边界约 x+378），
+        #    否则后建的提示标签会盖住它（z-order：后建的在上面）。
+        xr = x + 390
+        RW = CLIENT_W - xr - 16
         self.lbl_style_tip = self._label(
-            p, '提示：选「自定义」后可用上面两个颜色按钮改底色/字色；\n'
-               '「背景不透明度」只影响背景、「文字不透明度」只影响文字；\n'
-               '拖动透明度时，悬浮窗底部会同时显示背景和文字两个数值；\n'
-               '「显示方案」保存一整套显示设置（字段/主题/颜色/透明度/字号/开关），\n'
-               '切换后整套一起生效；右下角可拖动改大小，改动即时预览。', x, y)
+            p, '提示\n'
+               '· 改完立即生效，自动保存\n'
+               '· 背景/文字透明度互不影响\n'
+               '· 勾「背景透明」→ 背景全透\n'
+               '· 显示方案 = 一整套外观\n'
+               '· 右下角可拖动改大小', xr, 16, RW)
 
     # ---------------- 备份 ----------------
     def _build_backup(self, hinst):
         p = self._page('backup')
         x = SIDEBAR_W + 20
         y = 20
-        self._label(p, '从原版 StockWidget 导入', x, y)
-        self.lbl_legacy = self._label(p, '可自动迁移原版的自选股、显示字段、样式与位置', x, y + 22)
-        self.btn_legacy_detect = self._ctl(hinst, 'BUTTON', '检测原版配置', w32.BS_PUSHBUTTON,
-                                            x, y + 44, 110, 28, p, 9501)
-        self.btn_legacy_import = self._ctl(hinst, 'BUTTON', '一键导入', w32.BS_PUSHBUTTON,
-                                            x + 120, y + 44, 100, 28, p, 9502)
-        y += 92
-
         self._label(p, '本地备份', x, y)
         self._label(p, '导出全部配置（自选、分组、样式、快捷键）为 JSON 文件', x, y + 22)
         self.btn_export = self._ctl(hinst, 'BUTTON', '导出备份文件', w32.BS_PUSHBUTTON,
@@ -837,6 +843,10 @@ class SettingsWindow:
         tx_a = int(cfg.get('textAlpha', 100))
         self._set_trackbar(self.sb_bg, bg_a, 20, 100)
         self._set_label(self.lbl_bg, f'{bg_a}%')
+        # 「背景透明」勾上时滑块失效
+        self._set_check(self.cb_bg_transparent,
+                        bool(self.app.cfg.get('bgTransparent', False)))
+        self._sync_bg_slider_enabled()
         self._set_trackbar(self.sb_text, tx_a, 20, 100)
         self._set_label(self.lbl_text, f'{tx_a}%')
         try:
@@ -1460,7 +1470,7 @@ class SettingsWindow:
     DISPLAY_KEYS = ('theme', 'customBg', 'customText', 'bgAlpha', 'textAlpha',
                     'fontSize', 'nameChars', 'upColor', 'downColor',
                     'showTableHead', 'showStatus', 'showHeader',
-                    'showBorder', 'showGridLines', 'textOutline')
+                    'showBorder', 'showGridLines', 'textOutline', 'bgTransparent')
 
     def _default_display(self):
         """默认显示配置（方案没写到的键用这个兜底）"""
@@ -1508,6 +1518,7 @@ class SettingsWindow:
             'showHeader': chk('cb_header'),
             'showBorder': chk('cb_border'),
             'showGridLines': chk('cb_gridlines'),
+            'bgTransparent': chk('cb_bg_transparent'),
         }
         try:
             _oi = self._get_combo_sel(self.cb_outline)
@@ -1559,6 +1570,10 @@ class SettingsWindow:
             return
         # 1) 先套整套显示设置（主题/颜色/透明度/字号/开关…）
         self._apply_display(p.get('display'))
+        # 「背景透明」也要跟着方案走
+        self._set_check(self.cb_bg_transparent,
+                        bool(self.app.cfg.get('bgTransparent', False)))
+        self._sync_bg_slider_enabled()
         # 2) 再套字段（勾选 + 顺序）：方案里的顺序在前，其余字段按当前顺序接在后面
         rest = [k for k in self._field_order if k not in cols]
         self._field_order = cols + rest
@@ -1570,6 +1585,10 @@ class SettingsWindow:
         tx_a = int(self.app.cfg.get('textAlpha', 100))
         self._set_trackbar(self.sb_bg, bg_a, 20, 100)
         self._set_label(self.lbl_bg, f'{bg_a}%')
+        # 「背景透明」勾上时滑块失效
+        self._set_check(self.cb_bg_transparent,
+                        bool(self.app.cfg.get('bgTransparent', False)))
+        self._sync_bg_slider_enabled()
         self._set_trackbar(self.sb_text, tx_a, 20, 100)
         self._set_label(self.lbl_text, f'{tx_a}%')
         try:
@@ -1589,8 +1608,8 @@ class SettingsWindow:
             ctrl = getattr(self, name, None)
             if ctrl:
                 self._set_check(ctrl, self.app.cfg.get(key, True))
-        # 4) 立即预览到悬浮窗
-        self._preview()
+        # 4) 立即生效到悬浮窗 + 自动落盘
+        self._apply_change()
         self._set_label(self.lbl_preset_msg, '✓ 已套用「%s」（点「保存设置」生效）' % p['name'])
 
     def _save_preset(self):
@@ -1653,6 +1672,8 @@ class SettingsWindow:
             cfg['theme'] = self._theme_now()
             cfg['bgAlpha'] = max(20, min(100, self._get_trackbar(self.sb_bg)))
             cfg['textAlpha'] = max(20, min(100, self._get_trackbar(self.sb_text)))
+            # 背景完全透明（勾上后 bg_alpha 直接为 0，与文字通道无关）
+            cfg['bgTransparent'] = self._get_check(self.cb_bg_transparent)
             cfg['fontSize'] = self._font_size_now()
             try:
                 _oi = self._get_combo_sel(self.cb_outline)
@@ -1797,7 +1818,7 @@ class SettingsWindow:
         idx = len(self._combo_items(combo)) - 1
         self._set_combo_item_text(combo, idx, '自定义 #%s' % hexv)
         self._set_combo_sel(combo, idx)
-        self._preview()
+        self._apply_change()
 
     def _stop_preview(self):
         """关闭设置窗但没保存时，把悬浮窗恢复成已保存的样子"""
@@ -1857,7 +1878,9 @@ class SettingsWindow:
         self._set_text(btn, combo)
         self._set_check(chk, True)
         self._capture = None
-        self._set_label(self.lbl_hk_msg, f'{key} 已设为 {combo}，保存后生效')
+        self._set_label(self.lbl_hk_msg, f'{key} 已设为 {combo}，已生效')
+        # 立即注册并落盘（不用等点保存）
+        self._apply_change()
 
     # ---------------- 保存 ----------------
     def _collect(self):
@@ -1877,6 +1900,8 @@ class SettingsWindow:
         cfg['alwaysOnTop'] = self._get_check(self.cb_topmost)
         cfg['showHeader'] = self._get_check(self.cb_header)
         cfg['showTableHead'] = self._get_check(self.cb_table_head)
+        # 背景完全透明
+        cfg['bgTransparent'] = self._get_check(self.cb_bg_transparent)
         # 存储位置：空 = 用默认（程序目录内）
         cfg['configDir'] = (self._get_text(self.ed_config_dir) or '').strip()
         cfg['backupDir'] = (self._get_text(self.ed_backup_dir) or '').strip()
@@ -2073,7 +2098,7 @@ class SettingsWindow:
         name = COLUMN_MAP.get(key, (key, key))[1]
         self._set_label(self.lbl_col_msg,
                         '「%s」%s' % (name, '已隐藏' if key in checked else '已显示'))
-        self._preview()
+        self._apply_change()
 
     def _move_field_row(self, frm, to):
         """把第 frm 个字段拖到第 to 个位置"""
@@ -2086,7 +2111,7 @@ class SettingsWindow:
         # 列表内容要跟着换位（勾选前缀也要跟着走）
         self._fill_field_list(keep_sel=to)
         self._sync_field_columns()
-        self._preview()
+        self._apply_change()
 
     def _col_reset(self):
         """恢复默认：字段顺序与勾选都回到出厂状态"""
@@ -2095,7 +2120,7 @@ class SettingsWindow:
         self._field_order = self._init_field_order()
         self._fill_field_list()
         self._set_label(self.lbl_col_msg, '已恢复默认显示字段')
-        self._preview()
+        self._apply_change()
 
     def _col_set_all(self, on):
         """全部显示 / 全部隐藏"""
@@ -2108,7 +2133,7 @@ class SettingsWindow:
         self._fill_field_list()
         self._sync_field_columns()
         self._set_label(self.lbl_col_msg, '已%s全部字段' % ('显示' if on else '隐藏'))
-        self._preview()
+        self._apply_change()
 
     def _save(self):
         cfg = self._collect()
@@ -2167,6 +2192,12 @@ class SettingsWindow:
             user32.DestroyWindow(hwnd)
             return 0
         if msg == w32.WM_DESTROY:
+            if self._autosave_timer:
+                try:
+                    user32.KillTimer(self.hwnd, self._autosave_timer)
+                except Exception:  # noqa: BLE001
+                    pass
+                self._autosave_timer = None
             self._stop_preview()
             _SETTINGS_INSTANCES.pop(int(hwnd), None)
             self.hwnd = None
@@ -2186,16 +2217,22 @@ class SettingsWindow:
             user32.SetWindowPos(self.btn_save, None, 8, h - 68, SIDEBAR_W - 16, 30, 0x0004)
             user32.SetWindowPos(self.btn_close, None, 8, h - 34, SIDEBAR_W - 16, 28, 0x0004)
             return 0
+        if msg == w32.WM_TIMER:
+            # 自动保存定时器
+            if int(wparam) == self._autosave_id:
+                self._do_autosave()
+                return 0
+            return 0
         if msg == w32.WM_HSCROLL:
             # 滑块：拖动时实时预览到悬浮窗（字号已改成下拉框，不走这里）
             if lparam == self.sb_bg:
                 v = self._get_trackbar(self.sb_bg)
                 self._set_label(self.lbl_bg, f'{v}%')
-                self._preview(show_alpha=True)
+                self._apply_change(show_alpha=True)
             elif lparam == self.sb_text:
                 v = self._get_trackbar(self.sb_text)
                 self._set_label(self.lbl_text, f'{v}%')
-                self._preview(show_alpha=True)
+                self._apply_change(show_alpha=True)
             return 0
         if msg in (w32.WM_KEYDOWN, w32.WM_SYSKEYDOWN):
             if self._capture is not None:
@@ -2208,13 +2245,20 @@ class SettingsWindow:
         # —— 实时预览：样式相关的任何改动都立刻反映到悬浮窗（不用点保存）——
         # 滑块（trackbar）发的是 WM_HSCROLL，不走 WM_COMMAND，在 wndproc 里处理。
         if code == 0x0300:          # EN_CHANGE：输入框内容变化
-            if lparam and int(lparam) == int(getattr(self, 'ed_name_chars', 0) or 0):
-                self._preview()
-                return
-            # 自选代码输入框 → 实时显示自动识别结果
             if lparam and int(lparam) == int(getattr(self, 'ed_stock', 0) or 0):
+                # 自选代码输入框 → 实时显示自动识别结果（不是设置项，不自动保存）
                 self._preview_stock_codes()
                 return
+            # 其它设置项的输入框 → 立即生效并自动保存
+            for name in ('ed_name_chars', 'ed_interval', 'ed_width', 'ed_title',
+                         'ed_config_dir', 'ed_backup_dir'):
+                ctrl = getattr(self, name, None)
+                if ctrl and lparam and int(lparam) == int(ctrl):
+                    if name in ('ed_config_dir', 'ed_backup_dir'):
+                        # 存储位置：只更新提示，真正落盘等防抖自动保存
+                        self._update_dir_info()
+                    self._apply_change()
+                    return
             return
         if code == 1:               # CBN_SELCHANGE / LBN_SELCHANGE（通知码都是 1）
             # ⚠️ 只能拦截指定的控件，不能无条件 return ——
@@ -2227,23 +2271,25 @@ class SettingsWindow:
                 if 0 <= i < len(items) and items[i].startswith(self.CUSTOM_COLOR_PREFIX):
                     self._pick_custom_color(combo, 'upColor' if combo is self.cb_up else 'downColor')
                     return
-                self._preview()
+                self._apply_change()
                 return
             # 字号下拉框 → 立即换字号预览
             if lparam and int(lparam) == int(getattr(self, 'cb_font', 0) or 0):
-                self._preview()
+                self._apply_change()
                 return
             # 描边下拉框 → 立即预览
             if lparam and int(lparam) == int(getattr(self, 'cb_outline', 0) or 0):
-                self._preview()
+                self._apply_change()
                 return
-            # 数据源下拉框 → 切换自定义接口区的启用状态
+            # 数据源下拉框 → 切换自定义接口区的启用状态 + 立即换源生效
             if lparam and int(lparam) == int(getattr(self, 'cb_source', 0) or 0):
                 self._sync_custom_source_enabled()
+                self._apply_change()
                 return
             # 行情页平台下拉框 → 选「自定义…」时显示地址输入框
             if lparam and int(lparam) == int(getattr(self, 'cb_quote_platform', 0) or 0):
                 self._sync_quote_url_enabled()
+                self._schedule_autosave()
                 return
         # 左侧分组列表选中变化（LBN_SELCHANGE=1）：右侧股票列表跟着切换
         if lparam and lparam == self.lb_groups and code == 1:
@@ -2261,18 +2307,25 @@ class SettingsWindow:
             return
         # 主题单选
         if cid in (9401, 9402, 9403):
-            self._preview()
+            self._apply_change()
             return
         # 显示相关的复选框：勾一下就立刻反映到悬浮窗
         if code == 0:               # BN_CLICKED
-            for ctrl in (getattr(self, 'cb_table_head', None),
+            # 「背景透明」：勾上 → 背景完全透明、滑块禁用
+            cbt = getattr(self, 'cb_bg_transparent', None)
+            if cbt and lparam and int(lparam) == int(cbt):
+                self._sync_bg_slider_enabled()
+                self._apply_change()
+                return
+            for ctrl in (getattr(self, 'cb_topmost', None),
+                         getattr(self, 'cb_table_head', None),
                          getattr(self, 'cb_status', None),
                          getattr(self, 'cb_header', None),
                          getattr(self, 'cb_autosize', None),
                          getattr(self, 'cb_border', None),
                          getattr(self, 'cb_gridlines', None)):
                 if ctrl and lparam and int(lparam) == int(ctrl):
-                    self._preview()
+                    self._apply_change()
                     return
         # 自定义数据源：测试接口
         if cid == 9110:
@@ -2281,12 +2334,15 @@ class SettingsWindow:
         # 存储位置：浏览 / 恢复默认
         if cid == 9801:
             self._browse_dir('config')
+            self._apply_change()
             return
         if cid == 9802:
             self._browse_dir('backup')
+            self._apply_change()
             return
         if cid == 9803:
             self._reset_dirs()
+            self._apply_change()
             return
         # 显示方案：应用 / 保存 / 删除
         if cid == 9421:
@@ -2306,7 +2362,7 @@ class SettingsWindow:
             if ok and hexv:
                 self._set_text(btn, hexv)
                 self._select_theme('custom')
-                self._preview()
+                self._apply_change()
             return
         # 快捷键录制按钮
         if 9810 <= cid < 9810 + 8:
@@ -2330,10 +2386,6 @@ class SettingsWindow:
             self._col_set_all(True)
         elif cid == 9307:
             self._col_set_all(False)
-        elif cid == 9501:
-            self._detect_legacy()
-        elif cid == 9502:
-            self._import_legacy()
         elif cid == 9503:
             self._export()
         elif cid == 9504:
@@ -2498,30 +2550,55 @@ class SettingsWindow:
     def _get_list_count(self, lb):
         return user32.SendMessageW(lb, 0x018B, 0, 0)  # LB_GETCOUNT
 
-    def _detect_legacy(self):
-        p = legacy.find_legacy_config()
-        if p:
-            self._set_label(self.lbl_legacy, f'✓ 检测到：{p}')
-        else:
-            self._set_label(self.lbl_legacy, '未检测到原版配置文件（SW_config.json）')
+    def _apply_change(self, show_alpha=False):
+        """设置改动的统一入口：立刻预览到悬浮窗 + 自动落盘。
 
-    def _import_legacy(self):
-        ok, cfg, count, path, err = legacy.import_legacy()
-        if not ok:
-            self._set_label(self.lbl_legacy, f'✗ {err}')
-            return
-        self.app.cfg = cfg
-        self.app.save_cfg(cfg)
-        self.app.widget.cfg = cfg
-        self.app.widget.release_fonts()
-        self.app._register_hotkeys()
-        self.app.refresh()
-        self.app.widget.paint_now()
-        self._load_ui()
-        self._set_label(self.lbl_legacy, f'✓ 已导入 {count} 只自选股')
-        dialogs.message_box('导入成功', f'已从原版导入 {count} 只自选股及样式设置', 'info')
+        用户改任何一项都**立即生效**，不需要点「保存设置」。
+        """
+        self._preview(show_alpha=show_alpha)
+        self._schedule_autosave()
 
-    # ---------------- 存储位置 ----------------
+    def _schedule_autosave(self):
+        """延迟 600ms 自动保存：拖动滑块时不会每帧写一次盘"""
+        try:
+            if not self.hwnd or not user32.IsWindow(self.hwnd):
+                return
+            if self._autosave_timer:
+                user32.KillTimer(self.hwnd, self._autosave_timer)
+            self._autosave_timer = user32.SetTimer(self.hwnd, self._autosave_id,
+                                                   600, None)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _do_autosave(self):
+        """自动保存：把界面上的设置写进配置（不弹提示框）"""
+        self._autosave_timer = None
+        try:
+            if not self.hwnd:
+                return
+            cfg = self._collect()
+            self._apply_dirs()          # 存储位置也要跟着落盘
+            self.app.cfg = cfg
+            self.app.save_cfg(cfg)       # 会按勾选触发自动备份 / WebDAV 同步
+            self.app.widget.cfg = cfg
+            self.app.widget.release_fonts()
+            self.app._register_hotkeys()
+            self.app._apply_auto_size()
+            self.app.widget.paint_now()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _sync_bg_slider_enabled(self):
+        """「背景透明」勾上 → 背景滑块禁用；取消 → 恢复可用"""
+        try:
+            on = self._get_check(self.cb_bg_transparent)
+            user32.EnableWindow(self.sb_bg, 0 if on else 1)
+            # 数值标签也跟着变灰（提示当前背景是全透的）
+            self._set_label(self.lbl_bg, '全透明' if on
+                            else f'{self._get_trackbar(self.sb_bg)}%')
+        except Exception:  # noqa: BLE001
+            pass
+
     def _update_dir_info(self):
         """显示当前实际生效的存储位置 + 可写性提示
 
