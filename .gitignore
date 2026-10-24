@@ -1,0 +1,47 @@
+# ---- 构建产物 ----
+dingpan/dist/
+build/
+*.spec
+
+# build.py 从 tools/launcher_template.py 拷贝生成的入口
+dingpan/launcher.py
+
+# build.py 每次打包重写（时间戳）
+dingpan/src/dingpan/_buildinfo.py
+
+# ---- Python 缓存 ----
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+
+# ---- 视觉验收输出（每次 visual_check.py 自动重生成）----
+dingpan/tools/visual_shots/
+dingpan/page_shots/
+
+# ---- 临时诊断文件 ----
+diag_*.png
+lb_*.png
+*_zoom*.png
+ghost_*.png
+g1_*.png
+g2_*.png
+g3_*.png
+
+# ---- 日志与崩溃记录 ----
+*.log
+*.log.old
+crash.log*
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# ---- WorkBuddy 工作区数据（非源码）----
+# .workbuddy/memory/ 是本地开发记忆，含本机绝对路径与用户名等机器特有信息，
+# 不适合公开，故整目录忽略（文件仍保留在本地，不受影响）。
+.workbuddy/

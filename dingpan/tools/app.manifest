@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <assemblyIdentity
+      type="win32"
+      name="DingPan.StockWidget"
+      version="1.0.0.0"
+      processorArchitecture="*"
+  />
+  <description>盯盘 — 桌面悬浮行情挂件</description>
+
+  <!-- 启用 comctl32 v6 视觉样式：设置窗口控件使用系统现代主题 -->
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity
+          type="win32"
+          name="Microsoft.Windows.Common-Controls"
+          version="6.0.0.0"
+          publicKeyToken="6595b64144ccf1df"
+          language="*"
+          processorArchitecture="*"
+      />
+    </dependentAssembly>
+  </dependency>
+
+  <!-- DPI 感知：高分屏下不模糊 -->
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true</dpiAware>
+    </windowsSettings>
+  </application>
+
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+</assembly>
