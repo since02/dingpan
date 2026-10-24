@@ -19,6 +19,7 @@ CONFIG_FILE = 'dingpan-config.json'
 AUTO_BACKUP_FILE = 'dingpan-autobackup.json'   # 自动备份固定一个文件，始终覆盖
 DAV_AUTO_FILE = 'dingpan-autosync.json'        # WebDAV 自动同步固定一个文件，不堆积
 CACHE_FILE = 'dingpan-cache.json'              # 上次行情快照：启动先显示，避免空白等待
+POINTER_FILE = 'dingpan-location.json'         # 记录自定义的存储位置（程序目录下的指针）
 
 # 快照只留这些字段，几十只股票也就几 KB
 _CACHE_FIELDS = ('name', 'price', 'prevClose', 'change', 'changePct', 'open',
@@ -52,7 +53,11 @@ DEFAULT_CONFIG = {
     'bgAlpha': 100,
     'textAlpha': 100,
     # 文字描边：auto（背景透明时自动开）/ on（始终）/ off（关闭）
-    'textOutline': 'auto',
+    # 默认 off —— 描边在某些背景上看着像重影，用户反馈过，默认关掉更干净
+    'textOutline': 'off',
+    # 存储位置：空 = 用默认（主程序文件夹内）
+    'configDir': '',
+    'backupDir': '',
     # 自定义配色
     'customBg': '#1c1f28',
     'customText': '#e6e8ef',
@@ -117,25 +122,167 @@ DEFAULT_CONFIG = {
 }
 
 
-def app_dir():
-    """配置目录
+# ---------------------------------------------------------------------------
+# 存储位置
+# ---------------------------------------------------------------------------
+# 默认全部放在**主程序所在文件夹**内（绿色便携）：
+#   配置文件  → <程序目录>/dingpan-config.json
+#   备份文件  → <程序目录>/dingpan-backups/
+# 整个文件夹拷走即可带走全部设置。
+# 用户可在设置里改成任意自定义路径（自定义后写进配置文件本身）。
+#
+# ⚠️ 程序目录不可写时（如装到 C:\Program Files、或从 U 盘只读运行）
+#    自动降级到 %APPDATA% 下的 DingPan，并在设置页给出提示。
 
-    便携模式：若 exe 同目录存在 dingpan-data 文件夹，则配置放在那里，
-    整个文件夹（exe + dingpan-data）拷走即可带走全部设置。
+_PATH_OVERRIDES = {'config': None, 'backup': None}   # 用户自定义路径
+
+
+def _program_dir():
+    """主程序所在目录（打包后 = exe 同级；源码运行 = 项目根）
+
+    ⚠️ DINGPAN_HOME 环境变量可覆盖它 —— 测试用它把「程序目录」隔离到临时目录，
+    否则测试会把配置写进真实的项目目录（还会互相干扰）。
     """
+    override = os.environ.get('DINGPAN_HOME')
+    if override:
+        return os.path.abspath(override)
     try:
         if getattr(sys, 'frozen', False):
-            port = os.path.join(os.path.dirname(os.path.abspath(sys.executable)), 'dingpan-data')
-            if os.path.isdir(port):
-                return port
+            return os.path.dirname(os.path.abspath(sys.executable))
     except Exception:  # noqa: BLE001
         pass
+    # 源码运行：src/dingpan/storage.py → 上两级是项目根
+    here = os.path.dirname(os.path.abspath(__file__))
+    return os.path.dirname(os.path.dirname(here))
+
+
+def _fallback_dir():
+    """降级目录：%APPDATA% 下的 DingPan"""
     base = os.environ.get('APPDATA') or os.path.expanduser('~')
     return os.path.join(base, APP_DIR_NAME)
 
 
+def _writable(path):
+    """目录是否可写（能建文件就算可写）"""
+    try:
+        os.makedirs(path, exist_ok=True)
+        probe = os.path.join(path, '.dingpan_write_test')
+        with open(probe, 'w', encoding='utf-8') as f:
+            f.write('x')
+        os.remove(probe)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def set_path_override(kind, path):
+    """设置自定义路径（kind: 'config' / 'backup'）。传空串则恢复默认。"""
+    _PATH_OVERRIDES[kind] = (path or None)
+
+
+def get_path_override(kind):
+    return _PATH_OVERRIDES.get(kind)
+
+
+def app_dir():
+    """配置目录
+
+    优先级：
+      1. 用户自定义路径（设置页选的目录）
+      2. 主程序所在文件夹（绿色便携，exe 同级）
+      3. %APPDATA% 下的 DingPan（程序目录不可写时降级）
+    """
+    override = _PATH_OVERRIDES.get('config')
+    if override:
+        try:
+            os.makedirs(override, exist_ok=True)
+            return override
+        except Exception:  # noqa: BLE001
+            pass
+    prog = _program_dir()
+    if _writable(prog):
+        return prog
+    fb = _fallback_dir()
+    try:
+        os.makedirs(fb, exist_ok=True)
+    except Exception:  # noqa: BLE001
+        pass
+    return fb
+
+
+def backup_dir():
+    """备份文件目录
+
+    默认 <程序目录>/dingpan-backups/；用户可自定义。
+    """
+    override = _PATH_OVERRIDES.get('backup')
+    if override:
+        try:
+            os.makedirs(override, exist_ok=True)
+            return override
+        except Exception:  # noqa: BLE001
+            pass
+    base = app_dir()
+    d = os.path.join(base, 'dingpan-backups')
+    try:
+        os.makedirs(d, exist_ok=True)
+        return d
+    except Exception:  # noqa: BLE001
+        return base
+
+
 def config_path():
     return os.path.join(app_dir(), CONFIG_FILE)
+
+
+# ---------------------------------------------------------------------------
+# 位置指针
+# ---------------------------------------------------------------------------
+# 鸡生蛋问题：配置文件在自定义目录里，但要先知道目录才能找到配置文件。
+# 解法：在**程序目录**（或降级目录）放一个很小的指针文件，
+# 记录「配置在哪 / 备份在哪」。启动时先读指针，再读配置。
+
+def _pointer_dir():
+    """指针文件所在目录：程序目录；不可写则用降级目录"""
+    prog = _program_dir()
+    if _writable(prog):
+        return prog
+    fb = _fallback_dir()
+    try:
+        os.makedirs(fb, exist_ok=True)
+    except Exception:  # noqa: BLE001
+        pass
+    return fb
+
+
+def load_location():
+    """启动时读指针，恢复用户自定义的存储位置"""
+    try:
+        p = os.path.join(_pointer_dir(), POINTER_FILE)
+        with open(p, 'r', encoding='utf-8') as f:
+            d = json.load(f)
+        if isinstance(d, dict):
+            set_path_override('config', d.get('configDir') or None)
+            set_path_override('backup', d.get('backupDir') or None)
+            return True
+    except (OSError, ValueError):
+        pass
+    return False
+
+
+def save_location():
+    """把当前生效的存储位置写进指针文件"""
+    try:
+        d = os.path.join(_pointer_dir(), POINTER_FILE)
+        payload = {'configDir': _PATH_OVERRIDES.get('config') or '',
+                   'backupDir': _PATH_OVERRIDES.get('backup') or ''}
+        tmp = d + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, d)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def deep_merge(base, patch):
@@ -183,7 +330,7 @@ def load_config():
 def _from_auto_backup():
     """从自动备份里救回配置；没有可用备份时返回 None"""
     try:
-        with open(os.path.join(app_dir(), AUTO_BACKUP_FILE), 'r', encoding='utf-8') as f:
+        with open(os.path.join(backup_dir(), AUTO_BACKUP_FILE), 'r', encoding='utf-8') as f:
             parsed = json.load(f)
         cfg = parsed.get('config') if isinstance(parsed, dict) else None
         if isinstance(cfg, dict) and isinstance(cfg.get('groups'), list):
@@ -341,8 +488,8 @@ def export_backup(cfg, dest_path):
 def save_auto_backup(cfg):
     """设置变动后的自动备份：固定文件名，覆盖写，永远不会堆积文件"""
     try:
-        os.makedirs(app_dir(), exist_ok=True)
-        p = os.path.join(app_dir(), AUTO_BACKUP_FILE)
+        os.makedirs(backup_dir(), exist_ok=True)
+        p = os.path.join(backup_dir(), AUTO_BACKUP_FILE)
         tmp = p + '.tmp'
         payload = {'app': 'dingpan', 'exportedAt': datetime.now().isoformat(), 'config': cfg}
         with open(tmp, 'w', encoding='utf-8') as f:

@@ -42,6 +42,9 @@ FIELD_MARK_OFF = '[  ]'
 # 因此外框必须用 AdjustWindowRectEx 反算，否则底部按钮会被窗口边缘裁掉。
 CLIENT_W = 760
 CLIENT_H = 584
+# 左栏控件宽度上限（基础设置页左栏用；⚠️ 不能用局部变量，
+# _update_dir_info 等其它方法也要用）
+LEFT_COL_W = 300
 
 # ---------------- 窗口类：全局只注册一次 ----------------
 # 历史 Bug：每次打开设置窗都 RegisterClassW('DingPanSettings')，
@@ -335,7 +338,7 @@ class SettingsWindow:
         p = self._page('basic')
         x = SIDEBAR_W + 20          # 左栏 x=170（宽度上限 300，避免盖住右栏）
         xr = x + 320                # 右栏 x=490
-        LW = 300                    # 左栏控件宽度上限
+        LW = LEFT_COL_W             # 左栏控件宽度上限
         RW = CLIENT_W - xr - 16     # 右栏控件宽度上限
         y = 20
         # ---- 左栏：输入类控件 ----
@@ -365,10 +368,29 @@ class SettingsWindow:
         self.ed_title = self._ctl(hinst, 'EDIT', '', 0, x, y + 20, LW, 26, p)
         y += 62
 
-        # 左栏底部：数据源状态 + 提示
+        # 左栏底部：数据源状态（两行）
         self.lbl_basic_info = self._label(p, '', x, y, LW)
-        user32.SetWindowPos(self.lbl_basic_info, None, x, y, LW, 40, 0x0004)
-        self._label(p, '提示：字段到「显示字段」页，配色到「样式外观」页', x, y + 46, LW)
+        user32.SetWindowPos(self.lbl_basic_info, None, x, y, LW, 38, 0x0004)
+
+        # ---- 存储位置（配置目录 / 备份目录，可自定义）----
+        yp = y + 46
+        self._label(p, '存储位置（默认在程序文件夹内，可自定义）', x, yp, LW)
+        yp += 22
+        self._label(p, '配置文件目录', x, yp, 96)
+        self.ed_config_dir = self._ctl(hinst, 'EDIT', '', 0, x + 100, yp, 134, 24, p)
+        self.btn_cfg_dir = self._ctl(hinst, 'BUTTON', '浏览…', w32.BS_PUSHBUTTON,
+                                     x + 238, yp, 62, 24, p, 9801)
+        yp += 28
+        self._label(p, '备份文件目录', x, yp, 96)
+        self.ed_backup_dir = self._ctl(hinst, 'EDIT', '', 0, x + 100, yp, 134, 24, p)
+        self.btn_bak_dir = self._ctl(hinst, 'BUTTON', '浏览…', w32.BS_PUSHBUTTON,
+                                     x + 238, yp, 62, 24, p, 9802)
+        yp += 28
+        self.btn_reset_dirs = self._ctl(hinst, 'BUTTON', '恢复默认（程序文件夹内）',
+                                        w32.BS_PUSHBUTTON, x, yp, 190, 24, p, 9803)
+        # 当前生效路径（可能很长，单独一行、自动换行）
+        self._dir_info_x, self._dir_info_y = x, yp + 28
+        self.lbl_dir_info = self._label(p, '', x, yp + 28, LW)
 
         # ---- 右栏：复选框 ----
         yr = 20
@@ -493,32 +515,38 @@ class SettingsWindow:
                                    x + 180, y + 22, 80, 24, p, 9403)
         y += 60
 
-        # 背景颜色 + 背景不透明度（**只影响背景**，不影响文字）
+        # 背景颜色
         self._label(p, '背景颜色', x, y)
         self.btn_bg_color = self._ctl(hinst, 'BUTTON', '#1c1f28', w32.BS_PUSHBUTTON,
                                       x, y + 20, 110, 26, p, 9411)
-        self._label(p, '背景不透明度（只调背景）', x + 140, y)
-        self.sb_bg = self._ctl(hinst, 'msctls_trackbar32', '', 0x0001, x + 140, y + 18, 180, 30, p)
-        self.lbl_bg = self._label(p, '', x + 328, y + 24)
-        y += 62
+        y += 54
 
-        # 文字颜色 + 文字不透明度（**只影响文字**，不影响背景）
+        # 文字颜色
         self._label(p, '文字颜色', x, y)
         self.btn_text_color = self._ctl(hinst, 'BUTTON', '#e6e8ef', w32.BS_PUSHBUTTON,
                                         x, y + 20, 110, 26, p, 9412)
-        self._label(p, '文字不透明度（只调文字）', x + 140, y)
-        self.sb_text = self._ctl(hinst, 'msctls_trackbar32', '', 0x0001, x + 140, y + 18, 180, 30, p)
-        self.lbl_text = self._label(p, '', x + 328, y + 24)
-        y += 62
+        y += 54
 
-        # 文字描边：背景透明时给文字加一圈轮廓，保证可读性
+        # ---- 两个不透明度各自独占一行，逻辑彻底分开 ----
+        # 一个只调背景色，一个只调文字；各自一行，不跟别的设置混排。
+        self._label(p, '背景不透明度', x, y)
+        self.sb_bg = self._ctl(hinst, 'msctls_trackbar32', '', 0x0001,
+                               x, y + 18, 300, 30, p)
+        self.lbl_bg = self._label(p, '', x + 308, y + 24)
+        y += 52
+
+        self._label(p, '文字不透明度', x, y)
+        self.sb_text = self._ctl(hinst, 'msctls_trackbar32', '', 0x0001,
+                                 x, y + 18, 300, 30, p)
+        self.lbl_text = self._label(p, '', x + 308, y + 24)
+        y += 52
+
+        # 文字描边：默认关闭（描边在某些背景上看着像重影）
         self._label(p, '文字描边', x, y)
         self.cb_outline = self._ctl(hinst, 'COMBOBOX', '',
-                                    w32.CBS_DROPDOWNLIST | 0x0001, x, y + 18, 90, 120, p)
-        self._fill_combo(self.cb_outline, ['自动（背景透明时开）', '始终开启', '关闭'])
-        self.btn_bg_100 = self._ctl(hinst, 'BUTTON', '背景 100%',
-                                   w32.BS_PUSHBUTTON, x + 110, y + 18, 90, 26, p, 9431)
-        y += 62
+                                    w32.CBS_DROPDOWNLIST | 0x0001, x, y + 18, 110, 120, p)
+        self._fill_combo(self.cb_outline, ['关闭（默认）', '自动（背景透明时开）', '始终开启'])
+        y += 60
 
         # 字号：改用下拉框而不是滑块。
         # 原因：Windows trackbar 的**自动刻度会被稀疏化**（控件宽度相对取值跨度太窄时，
@@ -780,6 +808,10 @@ class SettingsWindow:
         self._set_combo_sel(self.cb_quote_platform, pid)
         self._set_text(self.ed_quote_url, cfg.get('quoteUrlTemplate', ''))
         total_stocks = sum(len(g.get('stocks', [])) for g in cfg.get('groups', []))
+        # 存储位置（显示当前生效的目录）
+        self._set_text(self.ed_config_dir, storage.app_dir())
+        self._set_text(self.ed_backup_dir, storage.backup_dir())
+        self._update_dir_info()
         self._set_label(self.lbl_basic_info,
                         f"数据源：腾讯 / 新浪 / 东方财富（失败自动降级）　"
                         f"当前自选 {total_stocks} 只")
@@ -808,8 +840,8 @@ class SettingsWindow:
         self._set_trackbar(self.sb_text, tx_a, 20, 100)
         self._set_label(self.lbl_text, f'{tx_a}%')
         try:
-            oi = {'auto': 0, 'on': 1, 'off': 2}.get(
-                str(cfg.get('textOutline', 'auto')).lower(), 0)
+            oi = {'off': 0, 'auto': 1, 'on': 2}.get(
+                str(cfg.get('textOutline', 'off')).lower(), 0)
             self._set_combo_sel(self.cb_outline, oi)
         except Exception:  # noqa: BLE001
             pass
@@ -1479,9 +1511,9 @@ class SettingsWindow:
         }
         try:
             _oi = self._get_combo_sel(self.cb_outline)
-            d['textOutline'] = ('auto', 'on', 'off')[_oi] if 0 <= _oi <= 2 else 'auto'
+            d['textOutline'] = ('off', 'auto', 'on')[_oi] if 0 <= _oi <= 2 else 'off'
         except Exception:  # noqa: BLE001
-            d['textOutline'] = 'auto'
+            d['textOutline'] = 'off'
         try:
             d['nameChars'] = max(0, min(20, int(self._get_text(self.ed_name_chars) or 0)))
         except (TypeError, ValueError):
@@ -1541,8 +1573,8 @@ class SettingsWindow:
         self._set_trackbar(self.sb_text, tx_a, 20, 100)
         self._set_label(self.lbl_text, f'{tx_a}%')
         try:
-            oi = {'auto': 0, 'on': 1, 'off': 2}.get(
-                str(cfg.get('textOutline', 'auto')).lower(), 0)
+            oi = {'off': 0, 'auto': 1, 'on': 2}.get(
+                str(cfg.get('textOutline', 'off')).lower(), 0)
             self._set_combo_sel(self.cb_outline, oi)
         except Exception:  # noqa: BLE001
             pass
@@ -1624,9 +1656,9 @@ class SettingsWindow:
             cfg['fontSize'] = self._font_size_now()
             try:
                 _oi = self._get_combo_sel(self.cb_outline)
-                cfg['textOutline'] = ('auto', 'on', 'off')[_oi] if 0 <= _oi <= 2 else 'auto'
+                cfg['textOutline'] = ('off', 'auto', 'on')[_oi] if 0 <= _oi <= 2 else 'off'
             except Exception:  # noqa: BLE001
-                cfg['textOutline'] = 'auto'
+                cfg['textOutline'] = 'off'
             cfg['customBg'] = (self._get_text(self.btn_bg_color) or '#1c1f28').strip()
             cfg['customText'] = (self._get_text(self.btn_text_color) or '#e6e8ef').strip()
             # 显示相关的开关也一并进预览（勾一下立刻生效）
@@ -1845,6 +1877,9 @@ class SettingsWindow:
         cfg['alwaysOnTop'] = self._get_check(self.cb_topmost)
         cfg['showHeader'] = self._get_check(self.cb_header)
         cfg['showTableHead'] = self._get_check(self.cb_table_head)
+        # 存储位置：空 = 用默认（程序目录内）
+        cfg['configDir'] = (self._get_text(self.ed_config_dir) or '').strip()
+        cfg['backupDir'] = (self._get_text(self.ed_backup_dir) or '').strip()
         cfg['showStatus'] = self._get_check(self.cb_status)
         cfg['autoSize'] = self._get_check(self.cb_autosize)
         cfg['showBorder'] = self._get_check(self.cb_border)
@@ -1886,9 +1921,9 @@ class SettingsWindow:
         cfg['fontSize'] = self._font_size_now()
         try:
             _oi = self._get_combo_sel(self.cb_outline)
-            cfg['textOutline'] = ('auto', 'on', 'off')[_oi] if 0 <= _oi <= 2 else 'auto'
+            cfg['textOutline'] = ('off', 'auto', 'on')[_oi] if 0 <= _oi <= 2 else 'off'
         except Exception:  # noqa: BLE001
-            cfg['textOutline'] = 'auto'
+            cfg['textOutline'] = 'off'
         # 涨跌颜色：预设项或「自定义 #xxxxxx」都要能正确取到值
         up = self._combo_color(self.cb_up)
         down = self._combo_color(self.cb_down)
@@ -2077,6 +2112,8 @@ class SettingsWindow:
 
     def _save(self):
         cfg = self._collect()
+        # 存储位置：先应用（让保存落到新目录），再写配置
+        self._apply_dirs()
         self.app.cfg = cfg
         self.app.save_cfg(cfg)            # 会按勾选触发自动备份 / WebDAV 同步
         self.app.widget.cfg = cfg
@@ -2241,11 +2278,15 @@ class SettingsWindow:
         if cid == 9110:
             self._test_custom_source()
             return
-        # 「背景 100%」快捷按钮
-        if cid == 9431:
-            self._set_trackbar(self.sb_bg, 100, 20, 100)
-            self._set_label(self.lbl_bg, '100%')
-            self._preview(show_alpha=True)
+        # 存储位置：浏览 / 恢复默认
+        if cid == 9801:
+            self._browse_dir('config')
+            return
+        if cid == 9802:
+            self._browse_dir('backup')
+            return
+        if cid == 9803:
+            self._reset_dirs()
             return
         # 显示方案：应用 / 保存 / 删除
         if cid == 9421:
@@ -2480,8 +2521,106 @@ class SettingsWindow:
         self._set_label(self.lbl_legacy, f'✓ 已导入 {count} 只自选股')
         dialogs.message_box('导入成功', f'已从原版导入 {count} 只自选股及样式设置', 'info')
 
+    # ---------------- 存储位置 ----------------
+    def _update_dir_info(self):
+        """显示当前实际生效的存储位置 + 可写性提示
+
+        路径可能很长，用「两行分别显示」而不是挤在一行里。
+        """
+        try:
+            cd = storage.app_dir()
+            bd = storage.backup_dir()
+            prog = storage._program_dir()
+            fallback = (cd != prog and storage._fallback_dir() == cd)
+            # 路径可能很长 → 中间省略，保留开头（盘符）和结尾（文件夹名）
+            def _short(p, keep=22):
+                p = str(p or '')
+                if len(p) <= keep + 14:
+                    return p
+                return p[:keep] + ' … ' + p[-12:]
+            txt = '当前配置：%s' % _short(cd)
+            txt += '\n当前备份：%s' % _short(bd)
+            if fallback:
+                txt += '\n（程序文件夹不可写，已自动改用 %%APPDATA%%）'
+            self._set_label(self.lbl_dir_info, txt)
+            # 路径可能换行 → 按实际行数给足高度（否则第二行会被裁掉）
+            per_line = max(8, int(LEFT_COL_W / 13))
+            rows = sum(max(1, -(-len(ln) // per_line)) for ln in txt.split('\n'))
+            # ⚠️ SetWindowPos 的 x/y 是**父窗口客户区坐标**，必须显式传对；
+            #    只改高度时要带 SWP_NOMOVE(0x0002)，否则 x/y=0 会被当成新位置。
+            user32.SetWindowPos(self.lbl_dir_info, None,
+                                self._dir_info_x, self._dir_info_y,
+                                LEFT_COL_W, max(18, rows * 16 + 4),
+                                0x0002 | 0x0004)   # NOMOVE | NOZORDER
+        except Exception:  # noqa: BLE001
+            # ⚠️ 不能静默吞掉：这类错误会让「存储位置」显示不出来，
+            #    而界面上完全看不出哪里出了问题。落盘便于排查。
+            try:
+                import datetime
+                import traceback
+                from .storage import app_dir
+                with open(os.path.join(app_dir(), 'crash.log'), 'a', encoding='utf-8') as f:
+                    f.write('\n===== settings._update_dir_info | %s =====\n'
+                            % datetime.datetime.now())
+                    traceback.print_exc(file=f)
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _browse_dir(self, kind):
+        """浏览选择目录（kind: 'config' / 'backup'）"""
+        title = '选择配置文件目录' if kind == 'config' else '选择备份文件目录'
+        cur = (self._get_text(self.ed_config_dir) if kind == 'config'
+               else self._get_text(self.ed_backup_dir))
+        d = dialogs.pick_folder_dialog(title, cur or storage.app_dir())
+        if not d:
+            return
+        if kind == 'config':
+            self._set_text(self.ed_config_dir, d)
+        else:
+            self._set_text(self.ed_backup_dir, d)
+        self._update_dir_info()
+
+    def _apply_dirs(self):
+        """把界面上的路径应用到运行中的程序（保存设置时调用）"""
+        cd = (self._get_text(self.ed_config_dir) or '').strip()
+        bd = (self._get_text(self.ed_backup_dir) or '').strip()
+        # 自定义路径要能写，否则回退
+        for kind, path in (('config', cd), ('backup', bd)):
+            if path:
+                try:
+                    os.makedirs(path, exist_ok=True)
+                    probe = os.path.join(path, '.dingpan_write_test')
+                    with open(probe, 'w', encoding='utf-8') as f:
+                        f.write('x')
+                    os.remove(probe)
+                except Exception as e:  # noqa: BLE001
+                    dialogs.message_box('盯盘', '该目录不可写，已恢复默认：\n%s' % path,
+                                        'warning')
+                    if kind == 'config':
+                        self._set_text(self.ed_config_dir, '')
+                    else:
+                        self._set_text(self.ed_backup_dir, '')
+                    cd = (self._get_text(self.ed_config_dir) or '').strip()
+                    bd = (self._get_text(self.ed_backup_dir) or '').strip()
+        storage.set_path_override('config', cd)
+        storage.set_path_override('backup', bd)
+        storage.save_location()      # 写指针文件，下次启动能找到
+        self._update_dir_info()
+
+    def _reset_dirs(self):
+        """恢复默认：程序文件夹内"""
+        self._set_text(self.ed_config_dir, '')
+        self._set_text(self.ed_backup_dir, '')
+        storage.set_path_override('config', None)
+        storage.set_path_override('backup', None)
+        self._update_dir_info()
+
     def _export(self):
-        path = dialogs.save_file_dialog('导出备份文件', f'dingpan-backup-{storage.stamp()}.json')
+        # 默认存到「备份文件目录」（程序目录下的 dingpan-backups/，可自定义）
+        bdir = storage.backup_dir()
+        os.makedirs(bdir, exist_ok=True)
+        path = dialogs.save_file_dialog(
+            '导出备份文件', os.path.join(bdir, f'dingpan-backup-{storage.stamp()}.json'))
         if not path:
             return
         ok, _, err = storage.export_backup(self._collect(), path)

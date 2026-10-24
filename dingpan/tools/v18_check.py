@@ -21,6 +21,8 @@ sys.path.insert(0, os.path.join(ROOT, 'src'))
 
 # ⚠️ 必须在 import dingpan.storage **之前**隔离 APPDATA
 os.environ['APPDATA'] = tempfile.mkdtemp(prefix='dp_v18_')
+# 程序目录也要隔离：配置默认写在程序目录内，不隔离会污染项目目录
+os.environ['DINGPAN_HOME'] = tempfile.mkdtemp(prefix='dphome_')
 
 from dingpan import quotes, storage, win32 as w32           # noqa: E402
 from dingpan.app import App                                 # noqa: E402
@@ -609,6 +611,70 @@ def main():
     check('手动始终开启描边（哪怕背景不透明）', w.theme.outline is not None,
           str(w.theme.outline))
     w.cfg = prev
+
+    # ============ 9. v1.0.22：存储位置 / 退出菜单 / 描边默认关 ============
+    print('\\n=== 9. 存储位置 / 退出菜单 / 描边默认值 ===')
+    from dingpan import storage as _st
+    # 9.1 默认配置目录 = 程序目录；备份目录 = 程序目录下的 dingpan-backups
+    _st.set_path_override('config', None)
+    _st.set_path_override('backup', None)
+    check('默认配置目录在程序文件夹内', _st.app_dir() == _st._program_dir(),
+          '%s vs %s' % (_st.app_dir(), _st._program_dir()))
+    check('默认备份目录是程序目录下的 dingpan-backups',
+          _st.backup_dir().endswith('dingpan-backups'), _st.backup_dir())
+    # 9.2 自定义路径生效 + 指针文件能恢复
+    _tmp = tempfile.mkdtemp(prefix='dpstore_t_')
+    _cd = os.path.join(_tmp, 'cfg')
+    _bd = os.path.join(_tmp, 'bak')
+    _st.set_path_override('config', _cd)
+    _st.set_path_override('backup', _bd)
+    check('自定义配置目录生效', _st.app_dir() == _cd, _st.app_dir())
+    check('自定义备份目录生效', _st.backup_dir() == _bd, _st.backup_dir())
+    _st.save_location()
+    _st.set_path_override('config', None)
+    _st.set_path_override('backup', None)
+    _st.load_location()
+    check('指针文件能恢复自定义目录（重启后仍生效）',
+          _st.app_dir() == _cd and _st.backup_dir() == _bd,
+          '%s / %s' % (_st.app_dir(), _st.backup_dir()))
+    _st.set_path_override('config', None)
+    _st.set_path_override('backup', None)
+    _st.save_location()
+    # 9.3 描边默认应为 off
+    from dingpan.storage import DEFAULT_CONFIG as _DC
+    check('描边默认是 off（不是 auto）', _DC.get('textOutline') == 'off',
+          str(_DC.get('textOutline')))
+    # 9.4 悬浮窗右键菜单最下项是「退出程序」
+    def _menu_labels(m):
+        out = []
+        n = user32.GetMenuItemCount(m)
+        for i in range(n):
+            buf = ctypes.create_unicode_buffer(256)
+            user32.GetMenuStringW(m, i, buf, 256, 0x0400)
+            out.append(buf.value)
+        return out
+    mm = app._build_main_menu()
+    labs = _menu_labels(mm)
+    user32.DestroyMenu(mm)
+    check('悬浮窗空白处菜单最下项是「退出程序」',
+          labs and labs[-1] == '退出程序', repr(labs[-1] if labs else None))
+    mr = app._build_row_menu(0)
+    labs_r = _menu_labels(mr)
+    user32.DestroyMenu(mr)
+    check('行右键菜单最下项是「退出程序」',
+          labs_r and labs_r[-1] == '退出程序', repr(labs_r[-1] if labs_r else None))
+    # 9.5 样式页没有「背景 100%」按钮了
+    src_set2 = io.open(os.path.join(ROOT, 'src', 'dingpan', 'settings.py'),
+                       encoding='utf-8').read()
+    check('样式页已移除「背景 100%」按钮', 'btn_bg_100' not in src_set2)
+    check('两个透明度各自独占一行',
+          "self._label(p, '背景不透明度', x, y)" in src_set2
+          and "self._label(p, '文字不透明度', x, y)" in src_set2)
+    # 9.6 存储位置 UI 存在
+    check('基础设置页有存储位置输入框与浏览按钮',
+          all(hasattr(obj, n) for n in ('ed_config_dir', 'ed_backup_dir',
+                                        'btn_cfg_dir', 'btn_bak_dir',
+                                        'btn_reset_dirs')))
 
     # 兜底：确认源码里没有残留的旧字段页控件
     src = io.open(os.path.join(ROOT, 'src', 'dingpan', 'settings.py'),

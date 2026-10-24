@@ -173,8 +173,11 @@ def main():
     # 历史事故：tools/selftest.py 的 test_config() 会真写配置文件再"复原"，
     # 而复原用的是 DEFAULT_CONFIG → 每跑一次自检就把用户的自选/样式/显示开关重置。
     # 而且它没隔离 APPDATA，直接写的是 %APPDATA%\DingPan\dingpan-config.json。
+    # v1.0.22 起配置默认写在**程序目录**内 → 除了 APPDATA，还必须隔离 DINGPAN_HOME，
+    # 否则测试会把配置写进真实项目目录（还会互相干扰）。
     tool_dir = os.path.join(ROOT, 'tools')
     bad_tools = []
+    no_home = []
     for fn in sorted(os.listdir(tool_dir)):
         if not fn.endswith('.py'):
             continue
@@ -184,8 +187,12 @@ def main():
             continue
         if 'APPDATA' not in src_:
             bad_tools.append('%s（会写配置但没隔离 APPDATA）' % fn)
+        if 'DINGPAN_HOME' not in src_:
+            no_home.append('%s（没隔离 DINGPAN_HOME，会写进程序目录）' % fn)
     check('会写配置的工具都隔离了 APPDATA', not bad_tools,
           '; '.join(bad_tools) if bad_tools else '已全部隔离')
+    check('会写配置的工具都隔离了程序目录（DINGPAN_HOME）', not no_home,
+          '; '.join(no_home) if no_home else '已全部隔离')
     # selftest 的"复原"不能用 DEFAULT_CONFIG 覆盖用户配置
     if os.path.isfile(os.path.join(tool_dir, 'selftest.py')):
         st_src = read_tool('selftest.py')

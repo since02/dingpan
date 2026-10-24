@@ -687,7 +687,7 @@ class Widget:
             # 智能描边：背景越透明，文字越难看清 → 自动给文字加一圈描边。
             #   这解决「背景调透明后文字看着也变淡」的观感问题
             #   （不透明度数值本身没变，是对比度下降）。
-            mode = str(self.cfg.get('textOutline', 'auto')).lower()
+            mode = str(self.cfg.get('textOutline', 'off')).lower()
             if mode == 'off':
                 base.outline = None
             elif mode == 'on':

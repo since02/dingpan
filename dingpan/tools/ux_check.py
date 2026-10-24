@@ -12,6 +12,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'src'))
 
 os.environ['APPDATA'] = tempfile.mkdtemp(prefix='dpux_')
+# 程序目录也要隔离：配置默认写在程序目录内，不隔离会污染项目目录
+os.environ['DINGPAN_HOME'] = tempfile.mkdtemp(prefix='dphome_')
 
 from dingpan.app import App, log_exception, crash_log_path   # noqa: E402
 from dingpan import win32 as w32                             # noqa: E402
@@ -277,7 +279,7 @@ def main():
         print('=== 12. 配置损坏自愈 ===')
         import json as _json
         import shutil as _shutil
-        d = storage.app_dir()
+        d = storage.backup_dir()
         os.makedirs(d, exist_ok=True)
         good = _json.loads(_json.dumps(app.cfg))
         good['groups'] = [{'id': 'g1', 'name': '我的自选',

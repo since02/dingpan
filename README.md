@@ -6,7 +6,7 @@
 纯 `ctypes` 调用 Win32 API 写成，**不依赖任何第三方 GUI 框架**（无 PyQt / 无 Electron / 无 tkinter），
 打包后是一个 ~8.5 MB 的独立 exe，丢到任何 Windows 机器上双击就能用。
 
-![版本](https://img.shields.io/badge/version-v1.0.21-2563eb)
+![版本](https://img.shields.io/badge/version-v1.0.22-2563eb)
 ![Python](https://img.shields.io/badge/python-3.8%2B-3776ab)
 ![平台](https://img.shields.io/badge/platform-Windows%20x64-2ea44f)
 ![许可](https://img.shields.io/badge/license-MIT-blue)
@@ -22,6 +22,7 @@
 | **两条透明度通道独立** | 背景不透明度与文字不透明度完全分开，可做「背景近透明、文字完全不透明」的效果 |
 | **智能文字描边** | 背景越透明自动给文字加描边（浅底配深色描边 / 深底配浅色描边），保证任何背景下都清晰 |
 | **自绘可勾选列表** | 设置页的自选股、显示字段列表都是自绘的：左复选框 / 中内容 / 右拖拽手柄，可勾选、可拖拽排序 |
+| **绿色便携** | 配置和备份默认就在 exe 旁边，整个文件夹拷走即可带走全部设置；位置可自定义 |
 | **完整显示方案** | 一个方案 = 一整套显示设置（字段 + 主题 + 颜色 + 两个透明度 + 字号 + 5 个显示开关） |
 | **多数据源** | 腾讯财经 / 新浪财经 / 东方财富，失败自动降级；也可接入**自定义接口** |
 | **自定义行情页跳转** | 雪球 / 腾讯 / 东财 / 新浪 / 同花顺，或自己填 URL 模板 |
@@ -116,12 +117,19 @@ python tools/v18_check.py         # 功能专项回归
 
 ## 配置存放位置
 
+**默认全部在主程序文件夹内**（绿色便携）：
+
 ```
-%APPDATA%\DingPan\dingpan-config.json     主配置
-%APPDATA%\DingPan\dingpan-cache.json       行情缓存
-%APPDATA%\DingPan\dingpan-autobackup.json  自动备份
-%APPDATA%\DingPan\crash.log                崩溃日志（异常时写这里）
+<程序目录>\dingpan-config.json       主配置
+<程序目录>\dingpan-cache.json        行情缓存
+<程序目录>\dingpan-backups\          备份文件夹
+<程序目录>\dingpan-location.json     记录自定义存储位置的指针
+<程序目录>\crash.log                 崩溃日志（异常时写这里）
 ```
+
+- 整个文件夹拷走 = 连同全部设置和备份一起带走。
+- 程序文件夹不可写时自动降级到 `%APPDATA%\DingPan`。
+- **可在「基础设置 → 存储位置」自定义**配置文件目录和备份文件目录。
 
 ## 项目结构
 

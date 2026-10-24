@@ -31,6 +31,8 @@ sys.path.insert(0, os.path.join(ROOT, 'src'))
 
 APPDATA_TMP = tempfile.mkdtemp(prefix='dpcycle_')
 os.environ['APPDATA'] = APPDATA_TMP
+# 程序目录也要隔离：配置默认写在程序目录内，不隔离会污染项目目录
+os.environ['DINGPAN_HOME'] = tempfile.mkdtemp(prefix='dphome_')
 
 from dingpan import dialogs              # noqa: E402
 from dingpan import storage              # noqa: E402

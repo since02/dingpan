@@ -14,6 +14,8 @@ sys.path.insert(0, os.path.join(ROOT, 'src'))
 
 # ⚠️ 隔离 APPDATA：测试绝不能碰用户的真实配置
 os.environ['APPDATA'] = tempfile.mkdtemp(prefix='dpwidget_')
+# 程序目录也要隔离：配置默认写在程序目录内，不隔离会污染项目目录
+os.environ['DINGPAN_HOME'] = tempfile.mkdtemp(prefix='dphome_')
 
 from dingpan import storage                 # noqa: E402
 from dingpan.widget import Widget, Theme    # noqa: E402

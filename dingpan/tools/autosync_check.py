@@ -15,6 +15,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'src'))
 
 os.environ['APPDATA'] = tempfile.mkdtemp(prefix='dpsync_')
+# 程序目录也要隔离：配置默认写在程序目录内，不隔离会污染项目目录
+os.environ['DINGPAN_HOME'] = tempfile.mkdtemp(prefix='dphome_')
 
 from dingpan.app import App                      # noqa: E402
 from dingpan import storage                      # noqa: E402
@@ -48,7 +50,7 @@ def main():
     app.cfg['autoDavSync'] = False          # 不碰网络，只验本地链路
     app.create_window()
     try:
-        bak = os.path.join(storage.app_dir(), storage.AUTO_BACKUP_FILE)
+        bak = os.path.join(storage.backup_dir(), storage.AUTO_BACKUP_FILE)
         print('=== 1. 设置变动 → 自动本地备份 ===')
         check('初始没有自动备份文件', not os.path.exists(bak))
         app.cfg['fontSize'] = 15
@@ -65,11 +67,11 @@ def main():
                   d['config'].get('fontSize'))
 
         print('=== 2. 再次变动仍覆盖同一个文件 ===')
-        before = sorted(os.listdir(storage.app_dir()))
+        before = sorted(os.listdir(storage.backup_dir()))
         app.cfg['fontSize'] = 17
         app.save_cfg()
         pump(app, 7000)
-        after = sorted(os.listdir(storage.app_dir()))
+        after = sorted(os.listdir(storage.backup_dir()))
         check('没有新增文件（始终覆盖）', before == after, after)
         mtime1 = os.path.getmtime(bak)
         import time

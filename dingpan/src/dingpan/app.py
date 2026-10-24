@@ -141,6 +141,9 @@ def _fallbacks(acc):
 
 class App:
     def __init__(self):
+        # ⚠️ 必须**先读位置指针**再读配置：
+        #    配置文件可能在用户自定义的目录里，指针文件记录了它在哪。
+        storage.load_location()
         self.cfg = storage.load_config()
         self.widget = Widget(self)
         self.hwnd = None
@@ -1084,6 +1087,8 @@ class App:
         user32.AppendMenuW(menu, w32.MF_STRING, 7, '删除自选')
         user32.AppendMenuW(menu, w32.MF_SEPARATOR, 0, None)
         user32.AppendMenuW(menu, w32.MF_STRING, 8, '设置…')
+        user32.AppendMenuW(menu, w32.MF_SEPARATOR, 0, None)
+        user32.AppendMenuW(menu, w32.MF_STRING, 9, '退出程序')
         return menu
 
     def _show_row_menu(self, sx, sy, row_index):
@@ -1119,6 +1124,8 @@ class App:
             self.widget.paint_now()
         elif cmd == 8:
             self.open_settings()
+        elif cmd == 9:
+            self.quit()
 
     # ---------------- 行顺序 ----------------
     def _move_stock(self, row, delta):
@@ -1167,6 +1174,8 @@ class App:
         user32.AppendMenuW(menu, w32.MF_STRING, 4, '设置…')
         user32.AppendMenuW(menu, w32.MF_SEPARATOR, 0, None)
         user32.AppendMenuW(menu, w32.MF_STRING, 5, '隐藏到托盘')
+        user32.AppendMenuW(menu, w32.MF_SEPARATOR, 0, None)
+        user32.AppendMenuW(menu, w32.MF_STRING, 6, '退出程序')
         return menu
 
     def _show_main_menu(self, sx, sy):
@@ -1183,6 +1192,8 @@ class App:
             self.open_settings()
         elif cmd == 5:
             self.set_visible(False)
+        elif cmd == 6:
+            self.quit()
 
     def _prompt_add_stock(self):
         """弹出输入框添加自选股，支持一次粘贴多只（空格 / 逗号 / 换行分隔）"""

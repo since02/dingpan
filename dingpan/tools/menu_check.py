@@ -25,6 +25,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'src'))
 
 os.environ['APPDATA'] = tempfile.mkdtemp(prefix='dpmenu_')
+# 程序目录也要隔离：配置默认写在程序目录内，不隔离会污染项目目录
+os.environ['DINGPAN_HOME'] = tempfile.mkdtemp(prefix='dphome_')
 
 from dingpan import win32 as w32                      # noqa: E402
 from dingpan.app import App                          # noqa: E402
@@ -164,7 +166,7 @@ def main():
     if m0:
         items0, ids0 = dump(m0, '行菜单(第1行)')
         expect0 = ['打开行情页', None, '上移', '下移', '置顶', '置底', None,
-                   '复制代码', '删除自选', None, '设置…']
+                   '复制代码', '删除自选', None, '设置…', None, '退出程序']
         check('行菜单项数正确', len(items0) == len(expect0),
               '%d（期望 %d）' % (len(items0), len(expect0)))
         for i, exp in enumerate(expect0):
@@ -190,13 +192,22 @@ def main():
         user32.DestroyMenu(m1)
 
     check('越界行号返回 None', app._build_row_menu(99) is None)
+    # v1.0.22：悬浮窗右键菜单最下边必须有「退出程序」（用户要求）
+    m_chk = app._build_row_menu(0)
+    if m_chk:
+        items_chk, _ = dump(m_chk, '行菜单(退出检查)')
+        check('行菜单最下项是「退出程序」', items_chk[-1] == '退出程序',
+              repr(items_chk[-1]))
 
     print('\n=== 4. 空白处菜单（生产代码 _build_main_menu）===')
     mm = app._build_main_menu()
     check('空白处菜单能构建', bool(mm))
     if mm:
         items_m, _ = dump(mm, '空白处菜单')
-        expect_m = ['添加自选股…', '从剪贴板添加', '复制全部代码', None, '设置…', None, '隐藏到托盘']
+        expect_m = ['添加自选股…', '从剪贴板添加', '复制全部代码', None, '设置…', None,
+                    '隐藏到托盘', None, '退出程序']
+        check('空白处菜单最下项是「退出程序」', items_m[-1] == '退出程序',
+              repr(items_m[-1]))
         check('空白处菜单项数正确', len(items_m) == len(expect_m),
               '%d（期望 %d）' % (len(items_m), len(expect_m)))
         for i, exp in enumerate(expect_m):

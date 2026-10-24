@@ -17,6 +17,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 # 这里必须先切到临时目录，再 import storage（storage 在 import 时就记下了路径）。
 REAL_APPDATA = os.environ.get('APPDATA')      # 记下真实目录：原版配置导入要用
 os.environ['APPDATA'] = tempfile.mkdtemp(prefix='dpselftest_')
+# 程序目录也要隔离：配置默认写在程序目录内，不隔离会污染项目目录
+os.environ['DINGPAN_HOME'] = tempfile.mkdtemp(prefix='dphome_')
 
 from dingpan import quotes, storage, legacy  # noqa: E402
 

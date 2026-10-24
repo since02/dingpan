@@ -220,14 +220,21 @@ def save_file_dialog(title, def_name, filter_str='JSON 文件\0*.json\0\0'):
     return ''
 
 
-def pick_folder_dialog(title):
-    """选择文件夹（IFileDialog 不依赖 COM 初始化，使用 SHBrowseForFolder 简化版）"""
+def pick_folder_dialog(title, initial_dir=''):
+    """选择文件夹（IFileDialog 不依赖 COM 初始化，使用 SHBrowseForFolder 简化版）
+
+    initial_dir：对话框打开时定位到的目录（无效则忽略）。
+    """
     BIF_RETURNONLYFSDIRS = 0x00000001
     BIF_NEWDIALOGSTYLE = 0x00000040
     SHBrowseForFolder = ctypes.windll.shell32.SHBrowseForFolder
     SHBrowseForFolder.restype = ctypes.c_longlong
     SHBrowseForFolder.argtypes = [ctypes.c_void_p, ctypes.c_longlong, ctypes.c_void_p,
                                    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+    SHParseDisplayName = ctypes.windll.shell32.SHParseDisplayName
+    SHParseDisplayName.restype = ctypes.c_longlong
+    SHParseDisplayName.argtypes = [wintypes.LPCWSTR, ctypes.c_void_p, ctypes.c_void_p,
+                                    ctypes.c_void_p, ctypes.c_void_p]
 
     class BROWSEINFOW(ctypes.Structure):
         _fields_ = [
@@ -246,7 +253,21 @@ def pick_folder_dialog(title):
     bi.pszDisplayName = ctypes.cast(disp, wintypes.LPWSTR)
     bi.lpszTitle = title
     bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE
+    # 定位到起始目录（失败就退回默认位置，不影响功能）
+    root_pidl = None
+    if initial_dir and os.path.isdir(initial_dir):
+        try:
+            root_pidl = SHParseDisplayName(initial_dir, None, None, None, None)
+            if root_pidl:
+                bi.pidlRoot = ctypes.c_void_p(root_pidl)
+        except Exception:  # noqa: BLE001
+            root_pidl = None
     pidl = SHBrowseForFolder(ctypes.byref(bi), None, None, None, None)
+    if root_pidl:
+        try:
+            ctypes.windll.shell32.CoTaskMemFree(root_pidl)
+        except Exception:  # noqa: BLE001
+            pass
     if not pidl:
         return ''
     try:
