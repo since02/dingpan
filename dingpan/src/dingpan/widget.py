@@ -736,6 +736,11 @@ class Widget:
                 base.outline = (self._outline_color(base) if bg_a < 60 else None)
             else:   # off
                 base.outline = None
+            # 是否真的开了描边（on=始终开；auto=仅背景很透时开；off=不开）。
+            # 蒙版 pass 只在「真的开了」时才给文字描 1px 外扩光环，否则即使选了关闭，
+            # 文字周围仍会被强行加一圈高不透明度的「描边」halo（半透明浅色背景叠深色桌面时，
+            # 这圈 halo 会变成明显的亮边，看着就像没关掉描边）。
+            self._outline_on = base.outline is not None
             # ⚠️ v1.0.24 曾在「背景全透明」时**强制**开描边 →
             #    用户反馈「描边明明选了关闭，深色背景下还是能看见」——
             #    那是越权替他做决定。现在 off 就是真的关掉，由用户自己选。
@@ -986,7 +991,9 @@ class Widget:
         #    描边不会因为背景半透明而变虚。
         oc = None
         if isinstance(self.theme, MaskTheme):
-            oc = color
+            # 仅当描边真的开启时，蒙版才加 1px 外扩（让描边像素拿到文字不透明度）。
+            # 关闭时绝不外扩 —— 否则文字周围会多一圈比背景更不透明的 halo，看着像没关描边。
+            oc = color if getattr(self, '_outline_on', False) else None
         else:
             oc = getattr(self.theme, 'outline', None)
         if oc is not None:

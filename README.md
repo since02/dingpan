@@ -6,7 +6,7 @@
 纯 `ctypes` 调用 Win32 API 写成，**不依赖任何第三方 GUI 框架**（无 PyQt / 无 Electron / 无 tkinter），
 打包后是一个 ~8.5 MB 的独立 exe，丢到任何 Windows 机器上双击就能用。
 
-![版本](https://img.shields.io/badge/version-v1.0.26-2563eb)
+![版本](https://img.shields.io/badge/version-v1.1-2563eb)
 ![Python](https://img.shields.io/badge/python-3.8%2B-3776ab)
 ![平台](https://img.shields.io/badge/platform-Windows%20x64-2ea44f)
 ![许可](https://img.shields.io/badge/license-MIT-blue)
