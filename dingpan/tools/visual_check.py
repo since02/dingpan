@@ -351,7 +351,7 @@ def shoot_settings(app):
     check('设置窗口能打开', bool(hwnd))
 
     pages = [(st.P_BASIC, 'basic'), (st.P_STOCKS, 'stocks'), (st.P_COLUMNS, 'columns'),
-             (st.P_STYLE, 'style'), (st.P_BACKUP, 'backup'), (st.P_DAV, 'dav'),
+             (st.P_STYLE, 'style'), (st.P_BACKUP, 'backup'),
              (st.P_HOTKEY, 'hotkeys'), (st.P_ABOUT, 'about')]
     all_ok = True
     for pid, key in pages:

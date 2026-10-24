@@ -15,8 +15,8 @@ user32.FindWindowW.restype = wintypes.HWND
 user32.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
 user32.SendMessageW.restype = ctypes.c_ssize_t
 
-PAGES = [(0, '基础设置'), (1, '自选管理'), (2, '显示字段'), (3, '样式外观'),
-         (4, '备份恢复'), (5, 'WebDAV'), (6, '快捷键'), (7, '关于')]
+PAGES = [(0, '基础设置'), (1, '样式方案'), (2, '自选管理'), (3, '显示字段'),
+         (4, '备份恢复'), (5, '快捷键'), (6, '关于')]
 
 
 def kill_all():

@@ -59,13 +59,18 @@ def main():
         translucent = sum(1 for a in alphas if 0 < a < 250)
         check('存在两种透明度的过渡像素', translucent > 0, '%d 个' % translucent)
 
-        # 背景 RGB 应该是**原色**（不预乘）：不透明度完全由 alpha 平面决定。
-        # 之前颜色里预乘一次、alpha 平面又乘一次 → 透明度被平方，
-        # 表现为「文字透明度调 50% 实际只剩 25%」「调背景把文字也调淡了」。
+        # ⚠️ 分层窗口的源图**必须预乘**（UpdateLayeredWindow 的合成公式
+        #    Cr = Cs + Cd×(1-As)）。不预乘的话，alpha=0 的像素会把
+        #    自己的颜色「加」到屏幕上 → 白色背景 + 0% 不透明度 = 屏幕上还是纯白，
+        #    黑色背景 + 0% 不透明度 = 什么都不加（正常透明）。
+        #    这正是用户说的「背景色为黑色时透明度有用、为白色时没用」。
+        #    → 背景 RGB 应 = 原色 × (bgAlpha/255)
         i = (h // 2) * w + 8
         b, g, r = buf[i * 4], buf[i * 4 + 1], buf[i * 4 + 2]
-        check('背景色不再预乘（由 alpha 平面统一控制）',
-              abs(b - 0x56) <= 3 and abs(g - 0x34) <= 3 and abs(r - 0x12) <= 3,
+        _f = 153 / 255.0
+        check('背景色按 alpha 预乘（分层窗口硬性要求）',
+              abs(b - 0x56 * _f) <= 3 and abs(g - 0x34 * _f) <= 3
+              and abs(r - 0x12 * _f) <= 3,
               (hex(r), hex(g), hex(b)))
         # 背景像素的 alpha 应等于 bgAlpha
         bg_a = int(max(0, min(100, float(app.cfg.get('bgAlpha', 100))))) * 255 // 100
@@ -103,11 +108,20 @@ def main():
             app.widget.paint()
             b2 = ctypes.string_at(app.widget._lay['cbits'].value, n * 4)
             a = b2[3::4]
-            # 按绿通道定位文字像素（见上）
-            br = max(range(n), key=lambda k: b2[k * 4 + 1])
-            # 找背景像素：alpha 众数里最大的那个（背景占比最大）
             from collections import Counter
+            # 背景像素：alpha 众数（背景占比最大）
             bg_a_val = Counter(a).most_common(1)[0][0]
+            # 文字像素：**精确匹配预乘后的正文色**。
+            # 正文色是 #00ff00，预乘后正好是 (B=0, G=tx_a, R=0)，
+            # 比「找最大绿通道」可靠得多（次要文字、状态栏的涨绿也会是绿的）。
+            _tx = int(max(0, min(100, float(tx))) * 255 / 100)
+            cands = [k for k in range(n)
+                     if b2[k * 4] == 0 and b2[k * 4 + 1] == _tx and b2[k * 4 + 2] == 0]
+            if not cands:
+                cands = [k for k in range(n) if a[k] != bg_a_val] or list(range(n))
+                br = max(cands, key=lambda k: b2[k * 4 + 1])
+            else:
+                br = cands[0]
             return bg_a_val, a[br]
 
         b1, t1 = alphas_of(100, 100)

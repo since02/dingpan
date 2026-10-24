@@ -180,13 +180,13 @@ def main():
               str([g.get('name') for g in got.get('groups') or []]))
 
         print('\n=== 各页面控件数量 ===')
-        for pid, name in [(0, '基础设置'), (1, '自选管理'), (2, '显示字段'), (3, '样式外观'),
-                          (4, '备份恢复'), (5, 'WebDAV'), (6, '快捷键'), (7, '关于')]:
+        for pid, name in [(0, '基础设置'), (1, '样式方案'), (2, '自选管理'), (3, '显示字段'),
+                          (4, '备份恢复'), (5, '快捷键'), (6, '关于')]:
             win._show_page(pid)
             visible = 0
             for key, hs in win.page_keys.items():
-                if key != {0: 'basic', 1: 'stocks', 2: 'columns', 3: 'style',
-                           4: 'backup', 5: 'dav', 6: 'hotkeys', 7: 'about'}[pid]:
+                if key != {0: 'basic', 1: 'style', 2: 'stocks', 3: 'columns',
+                           4: 'backup', 5: 'hotkeys', 6: 'about'}[pid]:
                     continue
                 for h in hs:
                     if user32.IsWindowVisible(h):

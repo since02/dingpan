@@ -126,6 +126,21 @@ def _mix(c, target, ratio):
     return w32.rgb(r, g, b)
 
 
+def _premul_c(c, a):
+    """颜色按 alpha 预乘（分层窗口的源图必须是预乘过的）。
+
+    a 为 0~255 的不透明度。a=0 → 变黑（这样它在屏幕上「什么都不加」，
+    才是真透明）；a=255 → 原样。
+    """
+    a = max(0, min(255, int(a)))
+    if a >= 255:
+        return c
+    r = int((c & 0xFF) * a / 255.0 + 0.5)
+    g = int(((c >> 8) & 0xFF) * a / 255.0 + 0.5)
+    b = int(((c >> 16) & 0xFF) * a / 255.0 + 0.5)
+    return w32.rgb(r, g, b)
+
+
 def _darker(c, ratio=0.18):
     r = int((c & 0xFF) * (1 - ratio))
     g = int(((c >> 8) & 0xFF) * (1 - ratio))
@@ -721,20 +736,20 @@ class Widget:
                 base.outline = (self._outline_color(base) if bg_a < 60 else None)
             else:   # off
                 base.outline = None
-            # ⚠️ 背景**完全**透明（bgTransparent）时文字没有底衬，
-            #    深色桌面上黑字等于「消失」—— 用户反馈「背景调全透明，文字也没了」。
-            #    这里强制给文字加一圈描边，描边色取「与文字相反」的亮度，
-            #    这样无论桌面是深是浅，文字都读得清。
-            if bg_a == 0 and base.outline is None:
-                base.outline = self._outline_color_for_text(base)
+            # ⚠️ v1.0.24 曾在「背景全透明」时**强制**开描边 →
+            #    用户反馈「描边明明选了关闭，深色背景下还是能看见」——
+            #    那是越权替他做决定。现在 off 就是真的关掉，由用户自己选。
 
-            # 1) 颜色 pass：用**原色**，不预乘 alpha
-            #    最终的不透明度完全由第 2 步的 alpha 平面决定。
-            #    ⚠️ 之前这里先按 alpha 预乘一次、最后 alpha 平面又乘一次
-            #    → 透明度被**平方**：文字 50% 实际只剩 25%（看着像"文字透明度不管用"），
-            #    而且背景调透明时文字边缘被一起拉淡（"调背景把文字也调了"）。
-            #    预乘只做一次、由 alpha 平面统一负责，两条通道才真正独立。
-            self.theme = base
+            # 1) 颜色 pass：**预乘 alpha** 后的颜色
+            #    ⚠️⚠️ 分层窗口的硬性要求：UpdateLayeredWindow 的合成公式是
+            #       Cr = Cs + Cd × (1 - As)  ← 源色是**预乘**过的
+            #       所以 alpha=0 的像素必须写成**黑色**，否则它会把颜色「加」到屏幕上：
+            #         背景色 #ffffff + alpha 0 → 屏幕上是一块**纯白**（看着完全不透明）
+            #         背景色 #000000 + alpha 0 → 什么都不加 → 桌面正常透出来
+            #       这正是用户说的「背景色为黑色时透明度有用、为白色时没用」。
+            #    预乘只做**一次**（只乘颜色通道），alpha 平面**不再**乘第二次，
+            #    否则透明度会被打平方（50% 实际只剩 25%）。
+            self.theme = self._premul_theme(base, bg_a, tx_a)
             self._draw_all(lay['cdc'], w, h, fs)
             self.theme = base
 
@@ -813,6 +828,33 @@ class Widget:
             return 0x00FFFFFF       # 深背景 → 浅色描边
         except Exception:  # noqa: BLE001
             return 0x00000000
+
+    def _premul_theme(self, theme, bg_a, tx_a):
+        """返回一份**预乘过 alpha** 的配色（颜色 pass 用）。
+
+        分层窗口的合成公式是 `Cr = Cs + Cd × (1 - As)`，源色必须已经乘过 alpha。
+        所以这里把「背景类」颜色按 bg_a 预乘、「内容类」颜色按 tx_a 预乘：
+          - 背景类：bg / header / panel（蒙版里是白色 → 落到背景不透明度）
+          - 内容类：text / dim / up / down / border / accent / flat / outline
+            （蒙版里是黑色 → 落到文字不透明度）
+
+        ⚠️ 预乘只做这一次。alpha 平面（`_alpha_lut`）**不再**乘第二遍，
+        否则透明度会被打平方（50% 实际只剩 25%）。
+        """
+        t = Theme.__new__(Theme)
+        t.bg = _premul_c(theme.bg, bg_a)
+        t.header = _premul_c(theme.header, bg_a)
+        t.panel = _premul_c(theme.panel, bg_a)
+        t.text = _premul_c(theme.text, tx_a)
+        t.dim = _premul_c(theme.dim, tx_a)
+        t.up = _premul_c(theme.up, tx_a)
+        t.down = _premul_c(theme.down, tx_a)
+        t.border = _premul_c(theme.border, tx_a)
+        t.accent = _premul_c(theme.accent, tx_a)
+        t.flat = _premul_c(theme.flat, tx_a)
+        t.outline = (_premul_c(theme.outline, tx_a)
+                     if getattr(theme, 'outline', None) is not None else None)
+        return t
 
     def _outline_color_for_text(self, theme):
         """透明背景下用的描边色：取「与文字相反」的亮度。

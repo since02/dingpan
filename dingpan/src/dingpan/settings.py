@@ -20,15 +20,16 @@ WM_STOCK_VERIFY_DONE = w32.WM_USER + 42  # 添加股票的代码验证完成
 WM_CUSTOM_TEST_DONE = w32.WM_USER + 43  # 自定义数据源接口测试完成
 
 # 页面 ID
-P_BASIC, P_STOCKS, P_COLUMNS, P_STYLE, P_BACKUP, P_DAV, P_HOTKEY, P_ABOUT = range(8)
+# v1.0.26：菜单精简成 7 项，WebDAV 并进「备份恢复」，
+# 「样式外观」改名「样式方案」并把「显示方案」也放进去。
+P_BASIC, P_STYLE, P_STOCKS, P_COLUMNS, P_BACKUP, P_HOTKEY, P_ABOUT = range(7)
 
 PAGES = [
     ('基础设置', P_BASIC),
+    ('样式方案', P_STYLE),
     ('自选管理', P_STOCKS),
     ('显示字段', P_COLUMNS),
-    ('样式外观', P_STYLE),
     ('备份恢复', P_BACKUP),
-    ('WebDAV', P_DAV),
     ('快捷键', P_HOTKEY),
     ('关于', P_ABOUT),
 ]
@@ -337,7 +338,6 @@ class SettingsWindow:
         self._build_columns(hinst)
         self._build_style(hinst)
         self._build_backup(hinst)
-        self._build_dav(hinst)
         self._build_hotkeys(hinst)
         self._build_about(hinst)
 
@@ -403,28 +403,14 @@ class SettingsWindow:
         self.lbl_dir_info = self._label(p, '', x, yp + 28, LW)
 
         # ---- 右栏：复选框 ----
+        # ⚠️ 「显示标题栏 / 表头 / 状态栏 / 外边框 / 内部线段 / 自动大小」
+        #    已整体挪到「样式方案」页（和「显示方案」放在一起），
+        #    这里只留「始终置顶」（它不属于外观方案）。
+        #    绝不能两处都建：控件 ID 会重复，命令就发到错的那个控件上。
         yr = 20
         self.cb_topmost = self._ctl(hinst, 'BUTTON', '悬浮窗始终置顶',
                                     w32.BS_AUTOCHECKBOX, xr, yr, 240, 24, p, 9101)
         yr += 30
-        self.cb_header = self._ctl(hinst, 'BUTTON', '显示标题栏和分组标签',
-                                   w32.BS_AUTOCHECKBOX, xr, yr, 240, 24, p, 9102)
-        yr += 30
-        # 「显示股票名称 / 显示股票代码」已移到「显示字段」页统一管理
-        self.cb_table_head = self._ctl(hinst, 'BUTTON', '显示列表表头（列标题）',
-                                       w32.BS_AUTOCHECKBOX, xr, yr, 240, 24, p, 9105)
-        yr += 30
-        self.cb_status = self._ctl(hinst, 'BUTTON', '显示底部状态栏',
-                                   w32.BS_AUTOCHECKBOX, xr, yr, 240, 24, p, 9106)
-        yr += 30
-        self.cb_autosize = self._ctl(hinst, 'BUTTON', '窗口大小按内容自动适应',
-                                     w32.BS_AUTOCHECKBOX, xr, yr, 240, 24, p, 9107)
-        yr += 30
-        self.cb_border = self._ctl(hinst, 'BUTTON', '显示悬浮窗外边框',
-                                   w32.BS_AUTOCHECKBOX, xr, yr, 240, 24, p, 9108)
-        yr += 30
-        self.cb_gridlines = self._ctl(hinst, 'BUTTON', '显示表格内部线段',
-                                      w32.BS_AUTOCHECKBOX, xr, yr, 240, 24, p, 9109)
 
         # ---- 自定义平台地址（平台选「自定义…」时才显示）----
         # ⚠️ y 必须从最后一个复选框下方开始，否则新建的 STATIC 标签
@@ -511,123 +497,143 @@ class SettingsWindow:
         self._label(p, '提示：顺序 = 悬浮窗里各列从左到右的排列。', xr, 210, 300)
         self._label(p, '取消勾选的字段不会显示，但不会被删掉。', xr, 232, 300)
 
-    # ---------------- 样式 ----------------
+    # ---------------- 样式方案 ----------------
     def _build_style(self, hinst):
+        """样式方案页：所有「外观类」设置 + 显示方案（预设）管理，都在这一页。
+
+        v1.0.26 重新排版：
+          左栏 = 主题 / 颜色 / 两个不透明度 / 描边 / 字号 / 涨跌色
+          右栏 = 显示选项 + 显示方案（预设）+ 提示
+        「显示方案」= 一整套外观快照，换方案立即生效（不用再点保存）。
+        """
         p = self._page('style')
-        x = SIDEBAR_W + 20
-        y = 16
+        x = SIDEBAR_W + 20            # 左栏起点
+        xr = x + 300                   # 右栏起点
+        RW = CLIENT_W - xr - 16        # 右栏可用宽度
+        y = 14
+
+        # ---------------- 左栏：主题 / 颜色 / 透明度 ----------------
         self._label(p, '主题', x, y)
         self.rb_dark = self._ctl(hinst, 'BUTTON', '深色', w32.BS_AUTORADIOBUTTON,
-                                 x, y + 22, 80, 24, p, 9401)
+                                 x, y + 22, 76, 24, p, 9401)
         self.rb_light = self._ctl(hinst, 'BUTTON', '浅色', w32.BS_AUTORADIOBUTTON,
-                                  x + 90, y + 22, 80, 24, p, 9402)
+                                  x + 84, y + 22, 76, 24, p, 9402)
         self.rb_custom = self._ctl(hinst, 'BUTTON', '自定义', w32.BS_AUTORADIOBUTTON,
-                                   x + 180, y + 22, 80, 24, p, 9403)
-        y += 60
+                                   x + 168, y + 22, 76, 24, p, 9403)
+        y += 56
 
-        # 背景颜色
         self._label(p, '背景颜色', x, y)
         self.btn_bg_color = self._ctl(hinst, 'BUTTON', '#1c1f28', w32.BS_PUSHBUTTON,
-                                      x, y + 20, 110, 26, p, 9411)
-        y += 48
-
-        # 文字颜色
-        self._label(p, '文字颜色', x, y)
+                                      x, y + 20, 96, 26, p, 9411)
+        self._label(p, '文字颜色', x + 108, y)
         self.btn_text_color = self._ctl(hinst, 'BUTTON', '#e6e8ef', w32.BS_PUSHBUTTON,
-                                        x, y + 20, 110, 26, p, 9412)
-        y += 48
+                                        x + 108, y + 20, 96, 26, p, 9412)
+        y += 56
 
         # ---- 两个不透明度各自独占一行，逻辑彻底分开 ----
-        # 一个只调背景色，一个只调文字；各自一行，不跟别的设置混排。
         self._label(p, '背景不透明度', x, y)
         self.sb_bg = self._ctl(hinst, 'msctls_trackbar32', '', 0x0001,
-                               x, y + 18, 220, 30, p)
-        # ⚠️ 数值标签必须**限宽**！
-        #    原来不传 w → _label 把它拉到窗口右边界（348px 宽），
-        #    正好压在下面的「背景透明」复选框上。
-        #    STATIC 控件是不透明的（画自己的底色），它一旦重绘
-        #    （比如 SetWindowText 改成 "50%"）就会把复选框**擦掉** →
-        #    用户看到的现象是「背景透明的设置框会莫名消失」。
-        #    限宽到 46px 后两者不再重叠，问题消失。
-        self.lbl_bg = self._label(p, '', x + 226, y + 24, w=46)
-        # 「背景透明」勾上 → 背景完全透明，滑块失效
+                               x, y + 18, 196, 30, p)
+        # ⚠️ 数值标签必须**限宽**！原来不传 w → 标签被拉到窗口右边界（348px 宽），
+        #    正好压在下面的「背景透明」复选框上；STATIC 底色不透明，
+        #    它一重绘就把复选框**擦掉**（用户看到「背景透明的设置框会莫名消失」）。
+        self.lbl_bg = self._label(p, '', x + 200, y + 24, w=46)
+        # 「背景透明」= 滑块在 0% 的快捷方式（滑块永远可调）
         self.cb_bg_transparent = self._ctl(hinst, 'BUTTON', '背景透明',
-                                            w32.BS_AUTOCHECKBOX, x + 280, y + 20,
+                                            w32.BS_AUTOCHECKBOX, x, y + 48,
                                             100, 24, p, 9804)
-        y += 46
+        y += 80
 
         self._label(p, '文字不透明度', x, y)
         self.sb_text = self._ctl(hinst, 'msctls_trackbar32', '', 0x0001,
-                                 x, y + 18, 300, 30, p)
-        self.lbl_text = self._label(p, '', x + 308, y + 24, w=52)
-        y += 46
+                                 x, y + 18, 196, 30, p)
+        self.lbl_text = self._label(p, '', x + 200, y + 24, w=52)
+        y += 58
 
         # 文字描边：默认关闭（描边在某些背景上看着像重影）
         self._label(p, '文字描边', x, y)
         self.cb_outline = self._ctl(hinst, 'COMBOBOX', '',
-                                    w32.CBS_DROPDOWNLIST | 0x0001, x, y + 18, 110, 120, p)
-        self._fill_combo(self.cb_outline, ['关闭（默认）', '自动（背景透明时开）', '始终开启'])
-        y += 52
+                                    w32.CBS_DROPDOWNLIST | 0x0001, x, y + 18, 120, 120, p)
+        self._fill_combo(self.cb_outline, ['关闭（默认）', '自动（背景很透时开）', '始终开启'])
+        y += 56
 
         # 字号：改用下拉框而不是滑块。
         # 原因：Windows trackbar 的**自动刻度会被稀疏化**（控件宽度相对取值跨度太窄时，
         # 系统会隔几个值才画一个刻度），点击时位置又吸附到刻度上 →
         # 10~20 之间只能选到 11/13/15 一类的中间值，选不了 12/14。
-        # 下拉框把 10~20 全列出来，点一下就精确选中，没有这个问题。
         self._label(p, '字体大小', x, y)
         self.cb_font = self._ctl(hinst, 'COMBOBOX', '',
                                  w32.CBS_DROPDOWNLIST | 0x0001, x, y + 18, 90, 200, p)
         self._fill_combo(self.cb_font, [str(v) for v in range(10, 21)])
-        y += 62
+        y += 56
 
-        # 涨跌颜色（末尾带一项「自定义…」，可选任意颜色）
+        # 涨跌颜色（末尾带一项「自定义…」，可选任意颜色；预设里含黑色）
         self._label(p, '上涨颜色', x, y)
         self.cb_up = self._ctl(hinst, 'COMBOBOX', '', w32.CBS_DROPDOWNLIST | 0x0001,
                                x, y + 20, 120, 200, p)
-        self._label(p, '下跌颜色', x + 150, y)
+        self._label(p, '下跌颜色', x + 132, y)
         self.cb_down = self._ctl(hinst, 'COMBOBOX', '', w32.CBS_DROPDOWNLIST | 0x0001,
-                                 x + 150, y + 20, 120, 200, p)
+                                 x + 132, y + 20, 120, 200, p)
         self._fill_color_combo(self.cb_up, ['红 #f6465d', '橙 #ff8b00', '绿 #0ecb81',
-                                            '蓝 #3d7eff', '紫 #a855f7', '白 #ffffff'])
+                                            '蓝 #3d7eff', '紫 #a855f7', '白 #ffffff',
+                                            '黑 #000000'])
         self._fill_color_combo(self.cb_down, ['绿 #0ecb81', '青 #00b8d9', '蓝 #3d7eff',
-                                              '紫 #a855f7', '红 #f6465d', '白 #ffffff'])
-        # ---- 显示方案（单栏，纵向间距已压缩以给底部提示留位置）----
-        y += 50
-        self._label(p, '显示方案', x, y)
+                                              '紫 #a855f7', '红 #f6465d', '白 #ffffff',
+                                              '黑 #000000'])
+
+        # ---------------- 右栏：显示选项 + 显示方案 ----------------
+        yr = 14
+        self._label(p, '显示选项', xr, yr)
+        yr += 24
+        self.cb_header = self._ctl(hinst, 'BUTTON', '显示标题栏和分组标签',
+                                   w32.BS_AUTOCHECKBOX, xr, yr, RW, 24, p, 9102)
+        yr += 27
+        self.cb_table_head = self._ctl(hinst, 'BUTTON', '显示列表表头（列标题）',
+                                       w32.BS_AUTOCHECKBOX, xr, yr, RW, 24, p, 9105)
+        yr += 27
+        self.cb_status = self._ctl(hinst, 'BUTTON', '显示底部状态栏',
+                                   w32.BS_AUTOCHECKBOX, xr, yr, RW, 24, p, 9106)
+        yr += 27
+        self.cb_border = self._ctl(hinst, 'BUTTON', '显示悬浮窗外边框',
+                                   w32.BS_AUTOCHECKBOX, xr, yr, RW, 24, p, 9108)
+        yr += 27
+        self.cb_gridlines = self._ctl(hinst, 'BUTTON', '显示表格内部线段',
+                                      w32.BS_AUTOCHECKBOX, xr, yr, RW, 24, p, 9109)
+        yr += 27
+        self.cb_autosize = self._ctl(hinst, 'BUTTON', '窗口大小按内容自动适应',
+                                     w32.BS_AUTOCHECKBOX, xr, yr, RW, 24, p, 9107)
+        yr += 36
+
+        # ---- 显示方案（预设）：换方案立即生效，不用再点保存 ----
+        self._label(p, '显示方案', xr, yr)
+        yr += 22
         self.cb_preset = self._ctl(hinst, 'COMBOBOX', '',
-                                   w32.CBS_DROPDOWNLIST | 0x0001, x, y + 20, 210, 200, p)
+                                   w32.CBS_DROPDOWNLIST | 0x0001, xr, yr,
+                                   RW - 62, 200, p, 9424)
         self.btn_preset_apply = self._ctl(hinst, 'BUTTON', '应用', w32.BS_PUSHBUTTON,
-                                           x + 220, y + 20, 60, 26, p, 9421)
-        y += 48
-        self._label(p, '保存当前字段为自定义方案', x, y)
-        self.ed_preset_name = self._ctl(hinst, 'EDIT', '', 0, x, y + 20, 210, 26, p)
+                                           xr + RW - 58, yr, 58, 26, p, 9421)
+        yr += 32
+        self.ed_preset_name = self._ctl(hinst, 'EDIT', '', 0, xr, yr, RW - 124, 26, p)
         self.btn_preset_save = self._ctl(hinst, 'BUTTON', '保存', w32.BS_PUSHBUTTON,
-                                          x + 220, y + 20, 60, 26, p, 9422)
+                                          xr + RW - 120, yr, 58, 26, p, 9422)
         self.btn_preset_del = self._ctl(hinst, 'BUTTON', '删除', w32.BS_PUSHBUTTON,
-                                         x + 286, y + 20, 60, 26, p, 9423)
-        y += 50
-        self.lbl_preset_msg = self._label(p, '', x, y)
-        y += 24
-        # 提示：放**右栏**（左栏纵向空间不够了，右栏完全空着）
-        # ⚠️ 右栏起点要避开「背景透明」复选框（右边界约 x+378），
-        #    否则后建的提示标签会盖住它（z-order：后建的在上面）。
-        xr = x + 390
-        RW = CLIENT_W - xr - 16
+                                         xr + RW - 58, yr, 58, 26, p, 9423)
+        yr += 30
+        self.lbl_preset_msg = self._label(p, '', xr, yr, RW)
+        yr += 22
         self.lbl_style_tip = self._label(
-            p, '提示\n'
-               '· 改完立即生效，自动保存\n'
+            p, '· 改完立即生效，自动保存\n'
                '· 背景/文字透明度互不影响\n'
                '· 背景不透明度 0% = 完全透明\n'
                '· 「背景透明」= 滑块拉到 0%\n'
-               '· 全透时文字自动描边，保证可读\n'
-               '· 显示方案 = 一整套外观\n'
-               '· 右下角可拖动改大小', xr, 16, RW)
+               '· 换显示方案立即套用\n'
+               '· 显示方案 = 一整套外观', xr, yr, RW)
 
-    # ---------------- 备份 ----------------
+    # ---------------- 备份恢复（本地 + WebDAV 都在这一页） ----------------
     def _build_backup(self, hinst):
         p = self._page('backup')
         x = SIDEBAR_W + 20
-        y = 20
+        y = 16
         self._label(p, '本地备份', x, y)
         self._label(p, '导出全部配置（自选、分组、样式、快捷键）为 JSON 文件', x, y + 22)
         self.btn_export = self._ctl(hinst, 'BUTTON', '导出备份文件', w32.BS_PUSHBUTTON,
@@ -636,19 +642,16 @@ class SettingsWindow:
                                     x + 120, y + 44, 100, 28, p, 9504)
         self.cb_auto_local = self._ctl(
             hinst, 'BUTTON', '设置变动后自动备份到本地（固定一个文件，始终覆盖，不会堆积）',
-            w32.BS_AUTOCHECKBOX, x, y + 80, 420, 24, p, 9506)
-        y += 118
+            w32.BS_AUTOCHECKBOX, x, y + 80, 440, 24, p, 9506)
+        y += 112
 
         self._label(p, '重置', x, y)
         self._label(p, '恢复出厂默认设置，当前自选股将被清空', x, y + 22)
         self.btn_reset = self._ctl(hinst, 'BUTTON', '恢复默认设置', w32.BS_PUSHBUTTON,
                                    x, y + 44, 110, 28, p, 9505)
+        y += 92
 
-    # ---------------- WebDAV ----------------
-    def _build_dav(self, hinst):
-        p = self._page('dav')
-        x = SIDEBAR_W + 20
-        y = 20
+        # ---- WebDAV（原来单独一页，v1.0.26 并到「备份恢复」）----
         self._label(p, 'WebDAV 服务器地址', x, y)
         self.ed_dav_url = self._ctl(hinst, 'EDIT', '', 0, x, y + 20, 380, 26, p)
         y += 56
@@ -763,8 +766,8 @@ class SettingsWindow:
 
     def _show_page(self, pid):
         self.page = pid
-        id2key = {P_BASIC: 'basic', P_STOCKS: 'stocks', P_COLUMNS: 'columns',
-                  P_STYLE: 'style', P_BACKUP: 'backup', P_DAV: 'dav',
+        id2key = {P_BASIC: 'basic', P_STYLE: 'style', P_STOCKS: 'stocks',
+                  P_COLUMNS: 'columns', P_BACKUP: 'backup',
                   P_HOTKEY: 'hotkeys', P_ABOUT: 'about'}
         cur = id2key.get(pid)
         # 隐藏所有页面控件，再显示当前页
@@ -1626,7 +1629,8 @@ class SettingsWindow:
                 self._set_check(ctrl, self.app.cfg.get(key, True))
         # 4) 立即生效到悬浮窗 + 自动落盘
         self._apply_change()
-        self._set_label(self.lbl_preset_msg, '✓ 已套用「%s」（点「保存设置」生效）' % p['name'])
+        # 已经立即套用并自动保存了，不用再让用户点「保存设置」
+        self._set_label(self.lbl_preset_msg, '✓ 已套用「%s」' % p['name'])
 
     def _save_preset(self):
         """把当前已选字段保存为一个自定义显示方案"""
@@ -2301,6 +2305,11 @@ class SettingsWindow:
             # 描边下拉框 → 立即预览
             if lparam and int(lparam) == int(getattr(self, 'cb_outline', 0) or 0):
                 self._apply_change()
+                return
+            # 显示方案下拉框 → **一选就套用**（用户要求：换方案后直接生效，不用再点保存）
+            if lparam and int(lparam) == int(getattr(self, 'cb_preset', 0) or 0):
+                if code == 1:          # CBN_SELCHANGE
+                    self._apply_preset()
                 return
             # 数据源下拉框 → 切换自定义接口区的启用状态 + 立即换源生效
             if lparam and int(lparam) == int(getattr(self, 'cb_source', 0) or 0):

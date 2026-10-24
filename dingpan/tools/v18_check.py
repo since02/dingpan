@@ -77,9 +77,9 @@ def main():
 
     # ============ 1. 自选列表不能跑到所有设置页上 ============
     print('\n=== 1. 自选列表只在自己那一页显示 ===')
-    pages = [(st.P_BASIC, '基础设置'), (st.P_STOCKS, '自选管理'),
-             (st.P_COLUMNS, '显示字段'), (st.P_STYLE, '样式外观'),
-             (st.P_BACKUP, '备份恢复'), (st.P_DAV, 'WebDAV'),
+    pages = [(st.P_BASIC, '基础设置'), (st.P_STYLE, '样式方案'),
+             (st.P_STOCKS, '自选管理'), (st.P_COLUMNS, '显示字段'),
+             (st.P_BACKUP, '备份恢复'),
              (st.P_HOTKEY, '快捷键'), (st.P_ABOUT, '关于')]
     leak = []
     for pid, name in pages:
@@ -412,7 +412,7 @@ def main():
     def alpha_probe(bg, tx):
         w = app.widget
         c = dict(app.cfg)
-        c['theme'] = 'custom'; c['customBg'] = '#ffffff'; c['customText'] = '#000000'
+        c['theme'] = 'custom'; c['customBg'] = '#ffffff'; c['customText'] = '#0000ff'
         c['upColor'] = '#000000'; c['downColor'] = '#000000'
         c['columns'] = ['name', 'price']
         c['showStatus'] = False; c['showTableHead'] = False
@@ -426,11 +426,15 @@ def main():
         # 全图统计（不能用 if/elif：白色像素很常见，会把后面的黑色像素漏掉）
         from collections import Counter as _C
         bg_c, tx_c = _C(), _C()
+        # ⚠️ 源图是**预乘**过的（分层窗口硬性要求）：
+        #    白底 #ffffff 预乘后 = (bg_a, bg_a, bg_a) 灰阶；
+        #    正文改成纯蓝 #0000ff，预乘后 = (0, 0, tx_a)，
+        #    这样背景和正文不会互相认错。
         for i in range(ww * hh):
             r, g, b, a = buf[i * 4 + 2], buf[i * 4 + 1], buf[i * 4], buf[i * 4 + 3]
-            if r > 230 and g > 230 and b > 230:
+            if r == g == b and b > 0:
                 bg_c[a] += 1
-            elif r < 120 and g < 120 and b < 120:
+            elif r == 0 and g == 0 and b > 0:
                 tx_c[a] += 1
         w.cfg = prev
         return (bg_c.most_common(1)[0][0] if bg_c else None,
@@ -473,6 +477,17 @@ def main():
     obj._set_combo_sel(obj.cb_preset, names.index('完整性验证方案'))
     obj._apply_preset()
     pump(app, 100)
+    # v1.0.26：**在下拉框里换方案就立即套用**，不用再点「应用 / 保存」
+    _obj_before = app.cfg.get('theme')
+    obj._set_check(obj.rb_dark, True)
+    obj._apply_change()
+    pump(app, 60)
+    _set_combo_sel_notify = obj.cb_preset
+    # 模拟「用户在下拉框里选了另一个方案」：CBN_SELCHANGE
+    obj._on_command(9424, _set_combo_sel_notify, 1)
+    pump(app, 120)
+    check('下拉框换方案立即生效（不用再点保存）',
+          app.cfg.get('theme') == 'custom', str(app.cfg.get('theme')))
     check('切换方案后主题回来了', app.cfg.get('theme') == 'custom', str(app.cfg.get('theme')))
     check('切换方案后背景色回来了', app.cfg.get('customBg') == '#123456',
           str(app.cfg.get('customBg')))
@@ -606,15 +621,23 @@ def main():
     w._cleanup_buffers()
     w._paint_layered(*w.client_size(), w.eff_font_size())
     check('手动关闭描边后不描边', w.theme.outline is None, str(w.theme.outline))
-    # 背景**完全**透明时，即使描边设为「关闭」也要强制描边，
-    # 否则深色桌面上文字等于消失（用户反馈「背景全透明，文字也没了」）
-    wcfg['textOutline'] = 'off'; wcfg['bgTransparent'] = True; wcfg['bgAlpha'] = 20
+    # 描边选「关闭」时**必须真的关掉**：
+    # v1.0.24 曾在背景全透明时强制开描边 → 用户反馈「描边关掉了还是能看见」。
+    wcfg['textOutline'] = 'off'; wcfg['bgTransparent'] = True; wcfg['bgAlpha'] = 0
     w.cfg = wcfg
     w.theme = _Theme(w.cfg)
     w._cleanup_buffers()
     w._paint_layered(*w.client_size(), w.eff_font_size())
-    check('背景完全透明时强制描边（保证文字可读）',
+    check('描边选「关闭」时真的不描边（不被强制开启）',
+          w.theme.outline is None, str(w.theme.outline))
+    wcfg['textOutline'] = 'on'
+    w.cfg = wcfg
+    w.theme = _Theme(w.cfg)
+    w._cleanup_buffers()
+    w._paint_layered(*w.client_size(), w.eff_font_size())
+    check('描边选「始终开启」时描边生效',
           w.theme.outline is not None, str(w.theme.outline))
+    wcfg['textOutline'] = 'off'
     wcfg['bgTransparent'] = False
     wcfg['textOutline'] = 'on'; wcfg['bgAlpha'] = 100
     w.cfg = wcfg

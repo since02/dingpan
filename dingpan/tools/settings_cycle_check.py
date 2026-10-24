@@ -107,7 +107,7 @@ def main():
     app.create_window()
 
     pages = [(st.P_BASIC, 'basic'), (st.P_STOCKS, 'stocks'), (st.P_COLUMNS, 'columns'),
-             (st.P_STYLE, 'style'), (st.P_BACKUP, 'backup'), (st.P_DAV, 'dav'),
+             (st.P_STYLE, 'style'), (st.P_BACKUP, 'backup'),
              (st.P_HOTKEY, 'hotkeys'), (st.P_ABOUT, 'about')]
 
     try:

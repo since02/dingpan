@@ -29,6 +29,31 @@ sys.path.insert(0, os.path.join(ROOT, 'src'))
 from dingpan import win32 as w32  # noqa: E402
 
 user32 = w32.user32
+
+
+def kill_stale():
+    """先清掉上一次测试残留的实例。
+
+    残留实例会占着单实例互斥锁 → 新实例直接退出 →
+    FindWindowW 找到的是**上一次的窗口** → 测出来的数据全是错的
+    （我在这上面栽过：把旧窗口当成「不透明的红色背景」查了半天）。
+    """
+    import subprocess as _sp
+    _sp.run(['taskkill', '/F', '/T', '/IM', 'dingpan.exe'], capture_output=True)
+    time.sleep(0.6)
+
+
+def kill_tree(pid):
+    """结束整个进程树。
+
+    ⚠️ PyInstaller onefile 会先起一个引导进程再拉起真正干活的子进程；
+    只 kill 父进程的话，**子进程还活着**，它仍然占着单实例互斥锁，
+    下一个测试实例会直接退出 → 测到的还是上一次的残留窗口（数据全错）。
+    """
+    import subprocess as _sp
+    _sp.run(['taskkill', '/F', '/T', '/PID', str(pid)], capture_output=True)
+    time.sleep(0.8)
+
 gdi32 = w32.gdi32
 FAILS = []
 
@@ -92,6 +117,7 @@ CFG = {'theme': 'custom', 'customBg': '#ff0000', 'customText': '#ffffff',
 
 def start(use_exe):
     if use_exe:
+        kill_stale()
         tmp = tempfile.mkdtemp(prefix='dpasc_')
         shutil.copy2(os.path.join(ROOT, 'dist', 'dingpan.exe'),
                      os.path.join(tmp, 'dingpan.exe'))
@@ -172,7 +198,7 @@ def main():
     if app:
         app._cleanup()
     if proc:
-        proc.kill()
+        kill_tree(proc.pid)
     print('\n结果: %s' % ('全部通过' if not FAILS else '失败 %s' % FAILS))
     return 1 if FAILS else 0
 
