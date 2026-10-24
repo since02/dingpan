@@ -202,6 +202,10 @@ class Widget:
         self._oldsize = (0, 0)
         # 分层窗口双缓冲（颜色 pass + 蒙版 pass）
         self._lay = None
+        # 逐像素透明是否已确认不可用（连续失败 ≥3 次才降级）
+        self._layered_dead = False
+        self._ulw_fail = 0
+        self._ulw_warned = False
         # 列宽缓存：一次绘制内只测量一遍
         self._wkey = None
         self._wval = None
@@ -595,15 +599,27 @@ class Widget:
         self._mkey = self._mval = None
         self.theme = Theme(self.cfg)
         fs = self.eff_font_size()
-        if self._paint_layered(w, h, fs):
+        if not self._layered_dead and self._paint_layered(w, h, fs):
+            self._ulw_fail = 0
             return
-        self._paint_legacy(w, h, fs)
+        # 逐像素透明失败。
+        # ⚠️ 这里**绝不能**直接用 GDI 往窗口上画一个不透明背景：
+        #    GDI 画上去的内容会留在分层表面**底下**，
+        #    之后即使 UpdateLayeredWindow 恢复了，窗口仍然是一块不透明的白板
+        #    （用户看到的「背景透明度调整完全没用了」就是这样来的）。
+        #    所以：前几次失败先**不画**（保留上一帧），等确认真的不可用了再降级。
+        self._ulw_fail = getattr(self, '_ulw_fail', 0) + 1
+        if self._ulw_fail >= 3:
+            self._layered_dead = True      # 确认不可用 → 降级为整窗统一 alpha
+        if self._layered_dead:
+            self._paint_legacy(w, h, fs)
+        # 否则：这一帧什么都不画，等下一帧重试 ULW（窗口保持上一帧的样子）
 
     def _alphas(self):
         """(背景 alpha, 文字 alpha)，0-255
 
         ⚠️ 两条通道**彻底独立**：
-        - 背景 alpha 只由 bgAlpha 决定；勾了「背景透明」则直接为 0（完全透明）
+        - 背景 alpha 只由 bgAlpha 决定（0% = 完全透明）
         - 文字 alpha 只由 textAlpha 决定，**完全不受背景影响**
         """
         if self.cfg.get('bgTransparent'):
@@ -833,13 +849,14 @@ class Widget:
                 alpha[by + x] = alpha[by + x] * x // max(1, cut)
                 alpha[by + w - 1 - x] = alpha[by + w - 1 - x] * x // max(1, cut)
 
-    # ---- 兜底：普通 GDI 双缓冲（UpdateLayeredWindow 不可用时） ----
+    # ---- 兜底：普通 GDI 双缓冲（UpdateLayeredWindow 确实不可用时） ----
     def _paint_legacy(self, w, h, fs):
-        """兜底路径：没有逐像素 alpha 时用 GDI 双缓冲画。
+        """兜底路径：没有逐像素 alpha 时用 GDI 双缓冲画 + 整窗统一 alpha。
 
-        ⚠️ 这里**不能**调用 SetLayeredWindowAttributes：
-        一旦调用，该窗口的 UpdateLayeredWindow 就永久失效（错误 87），
-        逐像素 alpha 再也回不来 —— 宁可画成不透明，也不能把窗口「毒化」。
+        ⚠️ 只有在**确认** UpdateLayeredWindow 不可用（连续失败 ≥3 次）后才会走到这里。
+        走到这里才调用 SetLayeredWindowAttributes —— 因为一旦调用，
+        该窗口的 UpdateLayeredWindow 就永久失效（错误 87），
+        逐像素 alpha 再也回不来，所以不能拿它当「临时兜底」。
         """
         hdc = user32.GetDC(self.hwnd)
         if not hdc:
@@ -856,6 +873,14 @@ class Widget:
             gdi32.BitBlt(hdc, 0, 0, w, h, mdc, 0, 0, w32.SRCCOPY)
         finally:
             user32.ReleaseDC(self.hwnd, hdc)
+        # 整窗统一 alpha：这是降级模式，背景/文字无法分开，
+        # 至少让「背景全透明」时文字还看得见（不要整窗 alpha=0 全灭）。
+        bg_a, tx_a = self._alphas()
+        alpha = bg_a if bg_a > 0 else tx_a
+        try:
+            user32.SetLayeredWindowAttributes(self.hwnd, 0, alpha, w32.LWA_ALPHA)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _cleanup_buffer(self):
         if self._memdc:

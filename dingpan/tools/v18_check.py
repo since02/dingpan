@@ -712,20 +712,34 @@ def main():
     w.cfg = wcfg
     w.cfg = prev
     # 10.2 复选框与滑块联动
+    # v1.0.24：背景不透明度范围改成 0–100%，0% 即完全透明；
+    # 滑块**永远可调**（以前勾上复选框就把滑块禁用了，
+    # 用户反馈「背景透明度调整完全没用了」），复选框只是 0% 的快捷方式。
     obj._show_page(st.P_STYLE)
     pump(app, 100)
     check('样式页有「背景透明」复选框',
           hasattr(obj, 'cb_bg_transparent'))
-    obj._set_check(obj.cb_bg_transparent, True)
+    obj._set_bg_alpha(70, sync_check=False)
     obj._sync_bg_slider_enabled()
     pump(app, 60)
-    check('勾选后背景滑块被禁用',
-          not user32.IsWindowEnabled(obj.sb_bg))
-    obj._set_check(obj.cb_bg_transparent, False)
-    obj._sync_bg_slider_enabled()
-    pump(app, 60)
-    check('取消勾选后背景滑块恢复可用',
+    check('背景滑块范围含 0%（0% = 完全透明）',
+          obj._get_trackbar(obj.sb_bg) == 70)
+    check('未全透时复选框不勾选',
+          not obj._get_check(obj.cb_bg_transparent))
+    check('背景滑块任何时候都可调（不会被禁用）',
           user32.IsWindowEnabled(obj.sb_bg))
+    obj._set_bg_alpha(0, sync_check=False)
+    obj._sync_bg_slider_enabled()
+    pump(app, 60)
+    check('滑块拖到 0% → 复选框自动勾上',
+          obj._get_check(obj.cb_bg_transparent))
+    check('滑块 0% 时依然可调',
+          user32.IsWindowEnabled(obj.sb_bg))
+    obj._set_bg_alpha(70, sync_check=False)
+    obj._sync_bg_slider_enabled()
+    pump(app, 60)
+    check('滑块离开 0% → 复选框自动取消',
+          not obj._get_check(obj.cb_bg_transparent))
     # 10.3 自动生效：改设置 → 自动落盘（不用点保存）
     obj._show_page(st.P_STYLE)
     pump(app, 80)

@@ -817,7 +817,7 @@ class App:
             if w32.low_level_key(w32.VK_CONTROL):
                 # Ctrl+滚轮：直接调背景不透明度，不用开设置窗
                 a = int(self.cfg.get('bgAlpha', 100)) + step * 5
-                self.cfg['bgAlpha'] = max(20, min(100, a))
+                self.cfg['bgAlpha'] = max(0, min(100, a))
                 self.save_cfg()
                 self.widget.status_text = '背景不透明度 %d%%' % self.cfg['bgAlpha']
                 self.widget.paint_now()

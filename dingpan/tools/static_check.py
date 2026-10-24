@@ -229,10 +229,22 @@ def main():
           not calls_api(app, 'SetLayeredWindowAttributes'),
           '第 %s 行 → 会毒化 UpdateLayeredWindow'
           % calls_api(app, 'SetLayeredWindowAttributes'))
-    check('widget.py 不调用 SetLayeredWindowAttributes',
-          not calls_api(wid, 'SetLayeredWindowAttributes'),
-          '第 %s 行 → 会毒化 UpdateLayeredWindow'
-          % calls_api(wid, 'SetLayeredWindowAttributes'))
+    # widget.py 里允许有，但**只能**出现在降级兜底路径 _paint_legacy 里，
+    # 而且必须等 UpdateLayeredWindow 连续失败 ≥3 次（_layered_dead）才允许调用。
+    _wid_sla = calls_api(wid, 'SetLayeredWindowAttributes')
+    _legacy_at = -1
+    for _i, _ln in enumerate(wid.splitlines(), 1):
+        if _ln.lstrip().startswith('def _paint_legacy'):
+            _legacy_at = _i
+            break
+    _sla_at = min(_wid_sla) if _wid_sla else -1
+    check('SetLayeredWindowAttributes 只出现在降级兜底路径 _paint_legacy 里',
+          (not _wid_sla) or (_legacy_at >= 0 and _sla_at > _legacy_at),
+          '调用在第 %s 行，_paint_legacy 定义在第 %s 行' % (_wid_sla, _legacy_at))
+    check('降级前必须等 UpdateLayeredWindow 连续失败 ≥3 次',
+          '_ulw_fail >= 3' in wid and '_layered_dead' in wid)
+    check('ULW 失败时不会用 GDI 画出不透明背景（避免残留成白板）',
+          'if self._layered_dead:' in wid)
     check('ULW 失败会写日志（不能静默降级）',
           '_log_ulw_failure' in wid)
     check('设置窗口带 WS_CLIPCHILDREN（防止父窗口盖掉子控件）',

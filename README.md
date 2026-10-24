@@ -6,7 +6,7 @@
 纯 `ctypes` 调用 Win32 API 写成，**不依赖任何第三方 GUI 框架**（无 PyQt / 无 Electron / 无 tkinter），
 打包后是一个 ~8.5 MB 的独立 exe，丢到任何 Windows 机器上双击就能用。
 
-![版本](https://img.shields.io/badge/version-v1.0.24-2563eb)
+![版本](https://img.shields.io/badge/version-v1.0.25-2563eb)
 ![Python](https://img.shields.io/badge/python-3.8%2B-3776ab)
 ![平台](https://img.shields.io/badge/platform-Windows%20x64-2ea44f)
 ![许可](https://img.shields.io/badge/license-MIT-blue)
@@ -19,9 +19,9 @@
 |---|---|
 | **单文件绿色版** | 打包成一个 exe，不需要装 Python，不写注册表，双击即用 |
 | **纯原生渲染** | `WS_EX_LAYERED` + `UpdateLayeredWindow` + 32bpp top-down DIB，**逐像素 alpha**，圆角、描边、半透明全部到位 |
-| **两条透明度通道独立** | 背景不透明度与文字不透明度完全分开，可做「背景近透明、文字完全不透明」的效果 |
+| **两条透明度通道独立** | 背景不透明度（0–100%，0% 即全透）与文字不透明度完全分开，可做「背景全透明、文字完全不透明」的效果 |
 | **智能文字描边** | 背景很透时自动给文字加描边；背景全透明时**强制描边**，深色桌面上也读得清 |
-| **背景可全透明** | 一个勾选框让背景完全透明（只剩文字浮在桌面上），滑块自动禁用 |
+| **背景可全透明** | 背景不透明度拖到 0% 即完全透明（只剩文字浮在桌面上），滑块永远可调 |
 | **改完即生效** | 所有设置改完立即生效并自动保存，不需要点保存 |
 | **自绘可勾选列表** | 设置页的自选股、显示字段列表都是自绘的：左复选框 / 中内容 / 右拖拽手柄，可勾选、可拖拽排序 |
 | **绿色便携** | 配置和备份默认就在 exe 旁边，整个文件夹拷走即可带走全部设置；位置可自定义 |
@@ -79,6 +79,7 @@ python tools/api_coverage.py      # Win32 API 的 DLL 归属与 argtypes 检查
 python tools/static_check.py      # 静态规则（禁用 API、危险模式）
 python tools/style_check.py       # 样式与透明度像素级回归
 python tools/alpha_check.py       # 两条 alpha 通道独立 + 「背景透明」复选框可见
+python tools/alpha_ux_check.py    # 屏幕级：背景透明度随时可调 + 0/30/60% 真实生效
 python tools/visual_check.py      # 界面截图验收
 python tools/v18_check.py         # 功能专项回归
 # ... 等
@@ -173,6 +174,11 @@ dingpan/
   这段初始化曾经就写在启动代码里，v1.0.24 已移除，`static_check.py` 有规则盯着。
 - **兄弟控件重叠会吃掉控件**：STATIC 控件底色不透明，它一重绘就把压在它下面的
   复选框擦掉（用户看到的是「控件莫名消失」）。数值标签必须限宽、互不重叠。
+- **GDI 画过的不透明背景会永远压在分层表面底下**：兜底路径一旦用 GDI 往窗口上画了
+  一整块背景，之后即使逐像素透明恢复了，窗口仍然是一块不透明的白板
+  （用户看到「背景透明度完全没反应」）。兜底路径要先「不画」，确认不可用才降级。
+- **源码跑测试时必须自己泵消息**：没有主循环时 `InvalidateRect` 产生的 WM_PAINT
+  根本不会被处理 → 画面停在上一帧，看起来像「设置不生效」。
 
 ## 已知限制
 

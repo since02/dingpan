@@ -350,6 +350,12 @@ def _migrate(cfg, raw):
     """
     changed = False
     if isinstance(raw, dict):
+        # v1.0.24：背景透明度改成 0–100%，0% 就是「完全透明」。
+        # 老配置里勾了「背景透明」是独立开关（bgTransparent=True），
+        # 现在统一折算成 bgAlpha=0 —— 否则升级后背景不再透明（用户会以为功能坏了）。
+        if raw.get('bgTransparent') and int(cfg.get('bgAlpha', 100) or 0) > 0:
+            cfg['bgAlpha'] = 0
+            changed = True
         # v1 的 opacity(0.3~1.0) 拆成 bgAlpha(0~100)
         if 'bgAlpha' not in raw and 'opacity' in raw:
             try:

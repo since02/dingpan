@@ -617,7 +617,8 @@ class SettingsWindow:
             p, '提示\n'
                '· 改完立即生效，自动保存\n'
                '· 背景/文字透明度互不影响\n'
-               '· 勾「背景透明」→ 背景全透\n'
+               '· 背景不透明度 0% = 完全透明\n'
+               '· 「背景透明」= 滑块拉到 0%\n'
                '· 全透时文字自动描边，保证可读\n'
                '· 显示方案 = 一整套外观\n'
                '· 右下角可拖动改大小', xr, 16, RW)
@@ -855,11 +856,14 @@ class SettingsWindow:
         self._set_check(self.rb_custom, theme == 'custom')
         bg_a = int(cfg.get('bgAlpha', 100))
         tx_a = int(cfg.get('textAlpha', 100))
-        self._set_trackbar(self.sb_bg, bg_a, 20, 100)
+        # ⚠️ 背景不透明度范围改成 **0–100%**：0% 就是「完全透明」。
+        #    以前范围是 20–100%，要「全透明」必须去勾「背景透明」复选框，
+        #    而勾上后滑块会被**禁用**（灰掉）→ 用户反馈「背景透明度调整完全没用了」。
+        #    现在滑块永远可调，0% 即全透，复选框退化成与滑块联动的快捷方式。
+        self._set_trackbar(self.sb_bg, bg_a, 0, 100)
         self._set_label(self.lbl_bg, f'{bg_a}%')
-        # 「背景透明」勾上时滑块失效
-        self._set_check(self.cb_bg_transparent,
-                        bool(self.app.cfg.get('bgTransparent', False)))
+        # 「背景透明」勾选框 = 滑块在 0% 的快捷方式
+        self._set_check(self.cb_bg_transparent, bg_a <= 0)
         self._sync_bg_slider_enabled()
         self._set_trackbar(self.sb_text, tx_a, 20, 100)
         self._set_label(self.lbl_text, f'{tx_a}%')
@@ -1518,11 +1522,12 @@ class SettingsWindow:
         def chk(name):
             ctrl = getattr(self, name, None)
             return self._get_check(ctrl) if ctrl else None
+        _bg_a = max(0, min(100, self._get_trackbar(self.sb_bg)))
         d = {
             'theme': self._theme_now(),
             'customBg': (self._get_text(self.btn_bg_color) or '#1c1f28').strip(),
             'customText': (self._get_text(self.btn_text_color) or '#e6e8ef').strip(),
-            'bgAlpha': max(20, min(100, self._get_trackbar(self.sb_bg))),
+            'bgAlpha': _bg_a,
             'textAlpha': max(20, min(100, self._get_trackbar(self.sb_text))),
             'fontSize': self._font_size_now(),
             'upColor': self._combo_color(self.cb_up) or '#f6465d',
@@ -1532,7 +1537,7 @@ class SettingsWindow:
             'showHeader': chk('cb_header'),
             'showBorder': chk('cb_border'),
             'showGridLines': chk('cb_gridlines'),
-            'bgTransparent': chk('cb_bg_transparent'),
+            'bgTransparent': _bg_a <= 0,
         }
         try:
             _oi = self._get_combo_sel(self.cb_outline)
@@ -1584,9 +1589,7 @@ class SettingsWindow:
             return
         # 1) 先套整套显示设置（主题/颜色/透明度/字号/开关…）
         self._apply_display(p.get('display'))
-        # 「背景透明」也要跟着方案走
-        self._set_check(self.cb_bg_transparent,
-                        bool(self.app.cfg.get('bgTransparent', False)))
+        # 「背景透明」也要跟着方案走（滑块 0% = 全透）
         self._sync_bg_slider_enabled()
         # 2) 再套字段（勾选 + 顺序）：方案里的顺序在前，其余字段按当前顺序接在后面
         rest = [k for k in self._field_order if k not in cols]
@@ -1597,11 +1600,10 @@ class SettingsWindow:
         # 3) 滑块 / 复选框 / 下拉框都要跟着刷一遍，否则界面上还是旧值
         bg_a = int(self.app.cfg.get('bgAlpha', 100))
         tx_a = int(self.app.cfg.get('textAlpha', 100))
-        self._set_trackbar(self.sb_bg, bg_a, 20, 100)
+        self._set_trackbar(self.sb_bg, bg_a, 0, 100)
         self._set_label(self.lbl_bg, f'{bg_a}%')
-        # 「背景透明」勾上时滑块失效
-        self._set_check(self.cb_bg_transparent,
-                        bool(self.app.cfg.get('bgTransparent', False)))
+        # 「背景透明」= 滑块在 0%
+        self._set_check(self.cb_bg_transparent, bg_a <= 0)
         self._sync_bg_slider_enabled()
         self._set_trackbar(self.sb_text, tx_a, 20, 100)
         self._set_label(self.lbl_text, f'{tx_a}%')
@@ -1684,10 +1686,11 @@ class SettingsWindow:
                 return
             cfg = dict(self.app.cfg)
             cfg['theme'] = self._theme_now()
-            cfg['bgAlpha'] = max(20, min(100, self._get_trackbar(self.sb_bg)))
+            cfg['bgAlpha'] = max(0, min(100, self._get_trackbar(self.sb_bg)))
             cfg['textAlpha'] = max(20, min(100, self._get_trackbar(self.sb_text)))
             # 背景完全透明（勾上后 bg_alpha 直接为 0，与文字通道无关）
-            cfg['bgTransparent'] = self._get_check(self.cb_bg_transparent)
+            cfg['bgTransparent'] = (self._get_check(self.cb_bg_transparent)
+                                    or cfg.get('bgAlpha', 100) <= 0)
             cfg['fontSize'] = self._font_size_now()
             try:
                 _oi = self._get_combo_sel(self.cb_outline)
@@ -1915,7 +1918,8 @@ class SettingsWindow:
         cfg['showHeader'] = self._get_check(self.cb_header)
         cfg['showTableHead'] = self._get_check(self.cb_table_head)
         # 背景完全透明
-        cfg['bgTransparent'] = self._get_check(self.cb_bg_transparent)
+        cfg['bgTransparent'] = (self._get_check(self.cb_bg_transparent)
+                                    or cfg.get('bgAlpha', 100) <= 0)
         # 存储位置：空 = 用默认（程序目录内）
         cfg['configDir'] = (self._get_text(self.ed_config_dir) or '').strip()
         cfg['backupDir'] = (self._get_text(self.ed_backup_dir) or '').strip()
@@ -1953,7 +1957,7 @@ class SettingsWindow:
             cfg['theme'] = 'custom'
         else:
             cfg['theme'] = 'dark'
-        cfg['bgAlpha'] = max(20, min(100, self._get_trackbar(self.sb_bg)))
+        cfg['bgAlpha'] = max(0, min(100, self._get_trackbar(self.sb_bg)))
         cfg['textAlpha'] = max(20, min(100, self._get_trackbar(self.sb_text)))
         cfg['customBg'] = (self._get_text(self.btn_bg_color) or '#1c1f28').strip()
         cfg['customText'] = (self._get_text(self.btn_text_color) or '#e6e8ef').strip()
@@ -2240,8 +2244,11 @@ class SettingsWindow:
         if msg == w32.WM_HSCROLL:
             # 滑块：拖动时实时预览到悬浮窗（字号已改成下拉框，不走这里）
             if lparam == self.sb_bg:
-                v = self._get_trackbar(self.sb_bg)
-                self._set_label(self.lbl_bg, f'{v}%')
+                v = int(self._get_trackbar(self.sb_bg))
+                if v > 0:
+                    self._bg_last_nonzero = v
+                # 滑块拖到 0% = 完全透明 → 勾选框自动跟着勾上
+                self._sync_bg_slider_enabled()
                 self._apply_change(show_alpha=True)
             elif lparam == self.sb_text:
                 v = self._get_trackbar(self.sb_text)
@@ -2325,9 +2332,17 @@ class SettingsWindow:
             return
         # 显示相关的复选框：勾一下就立刻反映到悬浮窗
         if code == 0:               # BN_CLICKED
-            # 「背景透明」：勾上 → 背景完全透明、滑块禁用
+            # 「背景透明」：它只是背景滑块在 0% 位置的快捷方式。
+            # 勾上 → 滑块拉到 0（完全透明）；取消 → 滑块回到上次非 0 的值。
+            # （之前是「勾上就禁用滑块」，用户反馈「背景透明度调整完全没用了」）
             cbt = getattr(self, 'cb_bg_transparent', None)
             if cbt and lparam and int(lparam) == int(cbt):
+                if self._get_check(cbt):
+                    self._bg_last_nonzero = max(1, self._get_trackbar(self.sb_bg))
+                    self._set_bg_alpha(0, sync_check=False)
+                else:
+                    self._set_bg_alpha(getattr(self, '_bg_last_nonzero', 100),
+                                       sync_check=False)
                 self._sync_bg_slider_enabled()
                 self._apply_change()
                 return
@@ -2603,13 +2618,32 @@ class SettingsWindow:
             pass
 
     def _sync_bg_slider_enabled(self):
-        """「背景透明」勾上 → 背景滑块禁用；取消 → 恢复可用"""
+        """背景透明度滑块与「背景透明」勾选框联动。
+
+        v1.0.24 之前：勾上「背景透明」→ 滑块被**禁用**（灰掉），
+        用户反馈「背景透明度调整完全没用了」。
+        现在：滑块**永远可调**，范围 0–100%，
+        0% 即「完全透明」；复选框只是滑块在 0% 位置的快捷方式。
+        """
         try:
-            on = self._get_check(self.cb_bg_transparent)
-            user32.EnableWindow(self.sb_bg, 0 if on else 1)
-            # 数值标签也跟着变灰（提示当前背景是全透的）
-            self._set_label(self.lbl_bg, '全透明' if on
-                            else f'{self._get_trackbar(self.sb_bg)}%')
+            v = int(self._get_trackbar(self.sb_bg))
+            on = (v <= 0)
+            # 滑块永远可用
+            user32.EnableWindow(self.sb_bg, 1)
+            # 勾选框与滑块位置保持一致
+            self._set_check(self.cb_bg_transparent, on)
+            self._set_label(self.lbl_bg, '全透明' if on else f'{v}%')
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _set_bg_alpha(self, value, sync_check=True):
+        """设置背景不透明度（0–100），0% = 完全透明。"""
+        try:
+            v = max(0, min(100, int(value)))
+            self._set_trackbar(self.sb_bg, v, 0, 100)
+            if sync_check:
+                self._set_check(self.cb_bg_transparent, v <= 0)
+            self._set_label(self.lbl_bg, '全透明' if v <= 0 else f'{v}%')
         except Exception:  # noqa: BLE001
             pass
 
