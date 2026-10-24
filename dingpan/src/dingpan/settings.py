@@ -202,6 +202,12 @@ class SettingsWindow:
 
         style = w32.WS_OVERLAPPEDWINDOW if hasattr(w32, 'WS_OVERLAPPEDWINDOW') else (
             0x00CF0000 | w32.WS_CAPTION | w32.WS_SYSMENU | w32.WS_THICKFRAME | w32.WS_MINIMIZEBOX)
+        # ⚠️ WS_CLIPCHILDREN 必须加在**窗口样式**上（不是窗口类样式）：
+        #    有了它，父窗口绘制/擦背景时会自动裁掉子控件所在区域，
+        #    控件就不会「莫名消失」（只画一半 / 整块空白）。
+        #    （之前还有个兄弟控件互相盖住的问题：数值标签没限宽，
+        #      STATIC 重绘时把复选框擦掉了 —— 已在 _build_style 里限宽修好。）
+        style |= w32.WS_CLIPCHILDREN
         ex = w32.WS_EX_APPWINDOW
 
         # 由目标客户区反算外框尺寸（关键修复：原来直接用 760x560 当外框，
@@ -536,17 +542,24 @@ class SettingsWindow:
         self._label(p, '背景不透明度', x, y)
         self.sb_bg = self._ctl(hinst, 'msctls_trackbar32', '', 0x0001,
                                x, y + 18, 220, 30, p)
-        self.lbl_bg = self._label(p, '', x + 226, y + 24)
+        # ⚠️ 数值标签必须**限宽**！
+        #    原来不传 w → _label 把它拉到窗口右边界（348px 宽），
+        #    正好压在下面的「背景透明」复选框上。
+        #    STATIC 控件是不透明的（画自己的底色），它一旦重绘
+        #    （比如 SetWindowText 改成 "50%"）就会把复选框**擦掉** →
+        #    用户看到的现象是「背景透明的设置框会莫名消失」。
+        #    限宽到 46px 后两者不再重叠，问题消失。
+        self.lbl_bg = self._label(p, '', x + 226, y + 24, w=46)
         # 「背景透明」勾上 → 背景完全透明，滑块失效
         self.cb_bg_transparent = self._ctl(hinst, 'BUTTON', '背景透明',
-                                            w32.BS_AUTOCHECKBOX, x + 268, y + 20,
-                                            110, 24, p, 9804)
+                                            w32.BS_AUTOCHECKBOX, x + 280, y + 20,
+                                            100, 24, p, 9804)
         y += 46
 
         self._label(p, '文字不透明度', x, y)
         self.sb_text = self._ctl(hinst, 'msctls_trackbar32', '', 0x0001,
                                  x, y + 18, 300, 30, p)
-        self.lbl_text = self._label(p, '', x + 308, y + 24)
+        self.lbl_text = self._label(p, '', x + 308, y + 24, w=52)
         y += 46
 
         # 文字描边：默认关闭（描边在某些背景上看着像重影）
@@ -605,6 +618,7 @@ class SettingsWindow:
                '· 改完立即生效，自动保存\n'
                '· 背景/文字透明度互不影响\n'
                '· 勾「背景透明」→ 背景全透\n'
+               '· 全透时文字自动描边，保证可读\n'
                '· 显示方案 = 一整套外观\n'
                '· 右下角可拖动改大小', xr, 16, RW)
 

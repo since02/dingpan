@@ -472,8 +472,17 @@ class App:
         user32.SetWindowLongPtrW(hwnd, w32.GWLP_USERDATA, ctypes.cast(
             ctypes.pointer(ctypes.c_longlong(id(self))), ctypes.c_void_p).value)
 
+        # ⚠️ 这里**绝对不能**调用 SetLayeredWindowAttributes！
+        # 一旦对窗口调用过它，Windows 就会把窗口切到「常量 alpha」模式，
+        # 之后 UpdateLayeredWindow **永远返回失败（错误 87）** ——
+        # 逐像素 alpha（背景/文字各自独立）会整体失效，
+        # 悄悄退化成「整窗统一透明度」，表现为：
+        #   · 背景调成全透明 → 文字也跟着消失（整窗 alpha=0）
+        #   · 调文字透明度 → 看着没反应
+        #   · 调背景透明度 → 文字和背景一起变
+        # 窗口已经带 WS_EX_LAYERED（见上面的 exstyle），直接用 UpdateLayeredWindow 即可。
         # 分层属性：先给一个"全不透明"初值，首次 paint 会改用逐像素 alpha 提交
-        user32.SetLayeredWindowAttributes(hwnd, 0, 255, w32.LWA_ALPHA)
+        # user32.SetLayeredWindowAttributes(hwnd, 0, 255, w32.LWA_ALPHA)   ← 已移除（会毒化 ULW）
 
         if self.cfg.get('alwaysOnTop', True):
             w32.set_always_on_top(hwnd, True)

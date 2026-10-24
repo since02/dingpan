@@ -199,6 +199,50 @@ def main():
         check('selftest 的配置复原不是「用默认值覆盖用户配置」',
               'save_config(storage.deep_merge(storage.DEFAULT_CONFIG' not in st_src)
 
+    print('\n=== 13. 分层窗口：绝不能调用 SetLayeredWindowAttributes ===')
+    # 一旦对窗口调用过 SetLayeredWindowAttributes，Windows 就把窗口切到
+    # 「常量 alpha」模式，之后 UpdateLayeredWindow **永久失败（错误 87）**。
+    # 逐像素 alpha 整体失效 → 退化成整窗统一透明度 →
+    #   「背景全透明 → 文字也没了 / 调文字透明度没反应 / 调背景文字一起变」。
+
+    def calls_api(src, api):
+        """AST 扫描：找出真正**调用**了某个 API 的位置（注释/字符串不算）"""
+        hits = []
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            return hits
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            f = node.func
+            name = None
+            if isinstance(f, ast.Attribute):
+                name = f.attr
+            elif isinstance(f, ast.Name):
+                name = f.id
+            if name == api:
+                hits.append(getattr(node, 'lineno', 0))
+        return hits
+
+    check('app.py 不对悬浮窗调用 SetLayeredWindowAttributes',
+          not calls_api(app, 'SetLayeredWindowAttributes'),
+          '第 %s 行 → 会毒化 UpdateLayeredWindow'
+          % calls_api(app, 'SetLayeredWindowAttributes'))
+    check('widget.py 不调用 SetLayeredWindowAttributes',
+          not calls_api(wid, 'SetLayeredWindowAttributes'),
+          '第 %s 行 → 会毒化 UpdateLayeredWindow'
+          % calls_api(wid, 'SetLayeredWindowAttributes'))
+    check('ULW 失败会写日志（不能静默降级）',
+          '_log_ulw_failure' in wid)
+    check('设置窗口带 WS_CLIPCHILDREN（防止父窗口盖掉子控件）',
+          'WS_CLIPCHILDREN' in st)
+    # 设置页的数值标签必须限宽，否则会盖住旁边的复选框
+    check('背景透明度数值标签限宽（不与复选框重叠）',
+          re.search(r'self\.lbl_bg\s*=\s*self\._label\([^)]*w\s*=', st) is not None)
+    check('文字透明度数值标签限宽',
+          re.search(r'self\.lbl_text\s*=\s*self\._label\([^)]*w\s*=', st) is not None)
+
     print('\n=== 9. 语法检查（全部模块可导入）===')
     for f in sorted(os.listdir(SRC)):
         if not f.endswith('.py'):

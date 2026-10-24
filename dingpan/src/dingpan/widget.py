@@ -5,6 +5,7 @@
 - 标题栏拖拽、滚轮、分组标签切换
 """
 import ctypes
+import os
 from ctypes import wintypes
 
 from . import win32 as w32
@@ -696,12 +697,20 @@ class Widget:
             #   这解决「背景调透明后文字看着也变淡」的观感问题
             #   （不透明度数值本身没变，是对比度下降）。
             mode = str(self.cfg.get('textOutline', 'off')).lower()
-            if mode == 'off':
-                base.outline = None
-            elif mode == 'on':
+            if mode == 'on':
                 base.outline = self._outline_color(base)
-            else:   # auto
-                base.outline = (self._outline_color(base) if bg_a < 200 else None)
+            elif mode == 'auto':
+                # 只有背景「很透」（≤23%）才描边。
+                # 阈值太高（比如 79%）时，半透明背景上的描边看着像重影（用户反馈过）。
+                base.outline = (self._outline_color(base) if bg_a < 60 else None)
+            else:   # off
+                base.outline = None
+            # ⚠️ 背景**完全**透明（bgTransparent）时文字没有底衬，
+            #    深色桌面上黑字等于「消失」—— 用户反馈「背景调全透明，文字也没了」。
+            #    这里强制给文字加一圈描边，描边色取「与文字相反」的亮度，
+            #    这样无论桌面是深是浅，文字都读得清。
+            if bg_a == 0 and base.outline is None:
+                base.outline = self._outline_color_for_text(base)
 
             # 1) 颜色 pass：用**原色**，不预乘 alpha
             #    最终的不透明度完全由第 2 步的 alpha 平面决定。
@@ -741,10 +750,16 @@ class Widget:
                 ok = user32.UpdateLayeredWindow(
                     self.hwnd, sdc, ctypes.byref(pt_dst), ctypes.byref(size),
                     lay['cdc'], ctypes.byref(pt_src), 0, ctypes.byref(blend), w32.ULW_ALPHA)
+                ulw_err = ctypes.get_last_error() if not ok else 0
             finally:
                 user32.ReleaseDC(None, sdc)
             if ok:
                 return True
+            # ⚠️ ULW 失败必须留痕：以前这里是静默 return False，
+            #    结果整窗退化成「统一透明度」，用户看到的现象是
+            #    「背景全透明 → 文字也没了 / 调文字透明度没反应」，
+            #    极难定位。现在把错误码写进 crash.log。
+            self._log_ulw_failure(ulw_err)
         except Exception as e:  # noqa: BLE001
             try:
                 from .app import log_exception
@@ -757,6 +772,22 @@ class Widget:
         self.theme.outline = _ol
         return False
 
+    def _log_ulw_failure(self, err=0):
+        """UpdateLayeredWindow 失败 → 写日志（只写一次，避免刷屏）"""
+        if getattr(self, '_ulw_warned', False):
+            return
+        self._ulw_warned = True
+        try:
+            import datetime
+            from .storage import app_dir
+            with open(os.path.join(app_dir(), 'crash.log'), 'a', encoding='utf-8') as f:
+                f.write('\n===== UpdateLayeredWindow 失败 (err=%s) %s =====\n'
+                        % (err, datetime.datetime.now()))
+                f.write('逐像素 alpha 已失效（背景/文字不再独立）。'
+                        '常见原因：对该窗口调用过 SetLayeredWindowAttributes。\n')
+        except Exception:  # noqa: BLE001
+            pass
+
     def _outline_color(self, theme):
         """描边色：浅背景用深色描边，深背景用浅色描边（保证有对比）"""
         try:
@@ -764,6 +795,19 @@ class Widget:
             if lum > 140:            # 浅背景 → 深色描边
                 return 0x00000000
             return 0x00FFFFFF       # 深背景 → 浅色描边
+        except Exception:  # noqa: BLE001
+            return 0x00000000
+
+    def _outline_color_for_text(self, theme):
+        """透明背景下用的描边色：取「与文字相反」的亮度。
+
+        黑字配白描边、白字配黑描边 —— 这样字形在任何桌面底色上都读得清
+        （描边本身不透明，背景透不透明都不影响它的对比度）。
+        """
+        try:
+            if _lum(theme.text) > 127:      # 浅色文字 → 深色描边
+                return 0x00000000
+            return 0x00FFFFFF                # 深色文字 → 浅色描边
         except Exception:  # noqa: BLE001
             return 0x00000000
 
@@ -789,8 +833,14 @@ class Widget:
                 alpha[by + x] = alpha[by + x] * x // max(1, cut)
                 alpha[by + w - 1 - x] = alpha[by + w - 1 - x] * x // max(1, cut)
 
-    # ---- 兜底：普通 GDI 双缓冲 + 整窗透明度（老系统无 ULW 时） ----
+    # ---- 兜底：普通 GDI 双缓冲（UpdateLayeredWindow 不可用时） ----
     def _paint_legacy(self, w, h, fs):
+        """兜底路径：没有逐像素 alpha 时用 GDI 双缓冲画。
+
+        ⚠️ 这里**不能**调用 SetLayeredWindowAttributes：
+        一旦调用，该窗口的 UpdateLayeredWindow 就永久失效（错误 87），
+        逐像素 alpha 再也回不来 —— 宁可画成不透明，也不能把窗口「毒化」。
+        """
         hdc = user32.GetDC(self.hwnd)
         if not hdc:
             return
@@ -806,11 +856,6 @@ class Widget:
             gdi32.BitBlt(hdc, 0, 0, w, h, mdc, 0, 0, w32.SRCCOPY)
         finally:
             user32.ReleaseDC(self.hwnd, hdc)
-        bg_a, tx_a = self._alphas()
-        try:
-            user32.SetLayeredWindowAttributes(self.hwnd, 0, min(bg_a, tx_a), w32.LWA_ALPHA)
-        except Exception:  # noqa: BLE001
-            pass
 
     def _cleanup_buffer(self):
         if self._memdc:

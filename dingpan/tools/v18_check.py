@@ -583,13 +583,16 @@ def main():
           hex(w._outline_color(t_light)))
     check('深背景用浅色描边', w._outline_color(t_dark) == 0x00FFFFFF,
           hex(w._outline_color(t_dark)))
-    # 描边决策：背景越透明越要描边
+    # 描边决策：只有背景「很透」时才自动描边。
+    # ⚠️ 阈值曾经是 bg_a<200（≈背景 78% 以下就描边），
+    #    半透明背景上描边看着像「重影」（用户反馈过），所以压到 bg_a<60（背景 ≤23%）。
     wcfg = dict(app.cfg)
     wcfg['theme'] = 'custom'; wcfg['customBg'] = '#ffffff'
     wcfg['customText'] = '#000000'; wcfg['columns'] = ['name', 'price']
     prev = w.cfg
-    for bg, expect in ((40, True), (100, False)):
+    for bg, expect in ((20, True), (40, False), (100, False)):
         wcfg['bgAlpha'] = bg; wcfg['textAlpha'] = 100; wcfg['textOutline'] = 'auto'
+        wcfg['bgTransparent'] = False
         w.cfg = wcfg
         w.theme = _Theme(w.cfg)
         w._cleanup_buffers()
@@ -597,12 +600,22 @@ def main():
         got = w.theme.outline is not None
         check('背景 %d%% 时%s描边' % (bg, '自动开启' if expect else '自动关闭'),
               got == expect, 'outline=%s' % w.theme.outline)
-    wcfg['bgAlpha'] = 40; wcfg['textOutline'] = 'off'
+    wcfg['bgAlpha'] = 40; wcfg['textOutline'] = 'off'; wcfg['bgTransparent'] = False
     w.cfg = wcfg
     w.theme = _Theme(w.cfg)
     w._cleanup_buffers()
     w._paint_layered(*w.client_size(), w.eff_font_size())
     check('手动关闭描边后不描边', w.theme.outline is None, str(w.theme.outline))
+    # 背景**完全**透明时，即使描边设为「关闭」也要强制描边，
+    # 否则深色桌面上文字等于消失（用户反馈「背景全透明，文字也没了」）
+    wcfg['textOutline'] = 'off'; wcfg['bgTransparent'] = True; wcfg['bgAlpha'] = 20
+    w.cfg = wcfg
+    w.theme = _Theme(w.cfg)
+    w._cleanup_buffers()
+    w._paint_layered(*w.client_size(), w.eff_font_size())
+    check('背景完全透明时强制描边（保证文字可读）',
+          w.theme.outline is not None, str(w.theme.outline))
+    wcfg['bgTransparent'] = False
     wcfg['textOutline'] = 'on'; wcfg['bgAlpha'] = 100
     w.cfg = wcfg
     w.theme = _Theme(w.cfg)
