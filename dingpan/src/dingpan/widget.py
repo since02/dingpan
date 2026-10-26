@@ -17,15 +17,17 @@ C_TRANSPARENT = 0x00000000
 
 
 def compute_pad(cfg, fs):
-    """算出悬浮窗的内部间距 (padX, padY, rowGap, colGap)，单位 px。
+    """算出悬浮窗的间距 (padX, padY, rowHeight, colGap)，单位 px。
 
     - auto  模式：随字号自适应（大字号留白更多，不会挤；小字号更紧凑）。
-    - custom 模式：用用户设定的 4 个值（各夹紧到合理上限）。
+    - custom 模式：用用户设定的值（各夹紧到合理范围）。
 
-    padX    = 内容区左右外边距（每侧）
-    padY    = 内容区上下外边距（每侧）
-    rowGap  = 每行之间的额外竖向间距（加在行高上）
-    colGap  = 相邻两列之间的横向间距（名称列↔价格列等）
+    padX       = 窗口左右内边距（每侧）
+    padY       = 窗口上下内边距（每侧）
+    rowHeight  = 每一行的「绝对高度」（行高，参照 Excel；不再是「行间距」叠加）
+    colGap     = 相邻两列之间的横向间距（名称列↔价格列等）
+    另：「列宽」(colWidth，每列最小宽度) 是统一下限，在 measure_columns 里单独处理，
+    不在这 4 元组里。
     """
     mode = str(cfg.get('padMode', 'auto')).lower()
 
@@ -36,19 +38,17 @@ def compute_pad(cfg, fs):
             return dflt
 
     if mode == 'custom':
-        px = _cint('padX', 6, 0, 80)
-        py = _cint('padY', 4, 0, 60)
-        rg = _cint('rowGap', 4, 0, 40)
-        cg = _cint('colGap', 6, 0, 40)
-        return px, py, rg, cg
-    # auto：随字号缩放
-    #   横向边距 ≈ 0.5×字号；竖向边距 ≈ 0.25×字号；
-    #   行间距   ≈ 0.20×字号；列间距   ≈ 0.35×字号（名称↔价格之间更明显）
+        px = _cint('padX', 6, 0, 120)
+        py = _cint('padY', 4, 0, 120)
+        rh = _cint('rowGap', 24, 16, 120)      # 行高（绝对）
+        cg = _cint('colGap', 6, 0, 80)
+        return px, py, rh, cg
+    # auto：随字号缩放（行高取「单行文字高度 + 少量余量」的绝对值）
     px = max(2, min(20, int(round(fs * 0.5))))
     py = max(0, min(12, int(round(fs * 0.25))))
-    rg = max(0, min(12, int(round(fs * 0.20))))
+    rh = max(18, int(round(fs * 1.55)))         # 行高（绝对，单行）
     cg = max(2, min(16, int(round(fs * 0.35))))
-    return px, py, rg, cg
+    return px, py, rh, cg
 
 
 class Theme:
@@ -283,7 +283,7 @@ class Widget:
         return r.right - r.left, r.bottom - r.top
 
     def _pad(self):
-        """当前内部间距 (padX, padY, rowGap, colGap)，见 compute_pad 的说明"""
+        """当前内部间距 (padX, padY, rowHeight, colGap)，见 compute_pad 的说明"""
         return compute_pad(self.cfg, self.eff_font_size())
 
     def _pad_x(self):
@@ -292,19 +292,22 @@ class Widget:
     def _pad_y(self):
         return compute_pad(self.cfg, self.eff_font_size())[1]
 
-    def _row_gap(self):
+    def _row_height_val(self):
+        """当前行高（绝对高度，px），见 compute_pad 的说明"""
         return compute_pad(self.cfg, self.eff_font_size())[2]
 
     def _col_gap(self):
         return compute_pad(self.cfg, self.eff_font_size())[3]
 
     def row_height(self, fs=None):
-        """单行高度 = 行内文字高度 + 行间距（rowGap）"""
+        """单行高度 = 行高（绝对），但保证文字放得下（名称两行时更高）"""
         fs = fs if fs is not None else self.eff_font_size()
-        rg = self._row_gap()
+        rh = self._row_height_val()
         if self.name_row_two_line():
-            return max(24, int(fs * 2.15)) + rg
-        return max(18, int(fs * 1.55)) + rg
+            lo = max(18, int(fs * 2.0) + 3)
+        else:
+            lo = max(16, fs + 3)
+        return max(lo, rh)
 
     def layout(self):
         """计算各区域高度"""
@@ -438,9 +441,16 @@ class Widget:
         stocks = groups[idx].get('stocks', []) if 0 <= idx < len(groups) else []
         # 取消勾选的（enabled=False）不显示，但仍保留在列表里，随时能勾回来
         stocks = [s for s in stocks if s.get('enabled', True)]
+        try:
+            # 自适应模式下「列宽」不参与（完全按内容定宽）；手动模式才用统一下限
+            _auto = str(self.cfg.get('padMode', 'auto')).lower() != 'custom'
+            col_width = 0 if _auto else max(0, min(160, int(self.cfg.get('colWidth', 0) or 0)))
+        except (TypeError, ValueError):
+            col_width = 0
         cache_key = (tuple(eff), mode, self.eff_font_size(), idx,
                      tuple(s.get('code') for s in stocks[:40]),
                      self.cfg.get('nameChars', 0),
+                     col_width,
                      tuple(sorted(self.quotes.keys())))
         if self._mkey == cache_key and self._mval is not None:
             return self._mval
@@ -522,6 +532,12 @@ class Widget:
                     mins.append(max(40, head_w + 8))
                 # 下限不能超过实际需求，否则「可削减余量」算出来是负数
                 mins[-1] = min(mins[-1], natural[-1])
+                # 「列宽」(colWidth) = 每列最小宽度的统一下限（0 = 不强制）。
+                # 把它同时铺到 natural 与 mins 上，既保证每列至少这么宽，
+                # 又不会破坏「下限 ≤ 实际需求」的约束。
+                if col_width > 0:
+                    natural[-1] = max(natural[-1], col_width)
+                    mins[-1] = max(mins[-1], col_width)
         finally:
             user32.ReleaseDC(self.hwnd, hdc)
 
@@ -536,7 +552,8 @@ class Widget:
         n = len(eff)
         gap_total = colGap * (n - 1) if n > 1 else 0
         cache_key = (total_w, tuple(eff), mode, self.eff_font_size(),
-                     self.app.group_index(), len(self.quotes), padX, colGap)
+                     self.app.group_index(), len(self.quotes), padX, colGap,
+                     int(self.cfg.get('colWidth', 0) or 0))
         if self._wkey == cache_key and self._wval is not None:
             return self._wval
         defs = [COLUMN_MAP[c] for c in eff]
@@ -1269,7 +1286,6 @@ class Widget:
                     self._text(dc, val, x + cw - 4, ry + (self.row_h - fs) // 2 - 1,
                                color, f, align='right', max_w=cw - 6)
                 x += cw + colGap
-                x += cw
 
     def _cell_value(self, q, key):
         t = self.theme

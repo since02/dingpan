@@ -604,31 +604,36 @@ class SettingsWindow:
                                      w32.BS_AUTOCHECKBOX, xr, yr, RW, 24, p, 9107)
         yr += 36
 
-        # ---- 内部间距（横向 / 竖向 / 行 / 列，可自适应或手动）----
+        # ---- 内部间距（行高 / 列宽 / 列间距 / 横竖留白，可自适应或手动）----
         self._label(p, '内部间距', xr, yr)
         self.cb_pad_auto = self._ctl(hinst, 'BUTTON', '间距随字号自适应',
                                      w32.BS_AUTOCHECKBOX, xr, yr + 22, RW, 24, p, 9110)
         yr += 52
-        # 手动模式下可分别设置的 4 个数值（自适应开启时自动禁用）
-        # 第一行：横向边距 / 竖向边距
-        self._label(p, '横向边距', xr, yr)
-        self.ed_pad_x = self._ctl(hinst, 'EDIT', '', w32.ES_NUMBER,
-                                  xr + 64, yr - 2, 46, 24, p, 9111)
-        self._label(p, '竖向边距', xr + 134, yr)
-        self.ed_pad_y = self._ctl(hinst, 'EDIT', '', w32.ES_NUMBER,
-                                  xr + 198, yr - 2, 46, 24, p, 9112)
-        yr += 30
-        # 第二行：行间距 / 列间距
-        self._label(p, '行间距', xr, yr)
+        # 手动模式下可分别设置（自适应开启时自动禁用并显示预测值）
+        # 第一行：行高 / 列宽
+        self._label(p, '行高', xr, yr)
         self.ed_row_gap = self._ctl(hinst, 'EDIT', '', w32.ES_NUMBER,
                                     xr + 64, yr - 2, 46, 24, p, 9113)
-        self._label(p, '列间距', xr + 134, yr)
+        self._label(p, '列宽', xr + 134, yr)
+        self.ed_col_width = self._ctl(hinst, 'EDIT', '', w32.ES_NUMBER,
+                                      xr + 198, yr - 2, 46, 24, p, 9115)
+        yr += 30
+        # 第二行：列间距 / 横向留白
+        self._label(p, '列间距', xr, yr)
         self.ed_col_gap = self._ctl(hinst, 'EDIT', '', w32.ES_NUMBER,
-                                    xr + 198, yr - 2, 46, 24, p, 9114)
+                                    xr + 64, yr - 2, 46, 24, p, 9114)
+        self._label(p, '横向留白', xr + 134, yr)
+        self.ed_pad_x = self._ctl(hinst, 'EDIT', '', w32.ES_NUMBER,
+                                  xr + 198, yr - 2, 46, 24, p, 9111)
+        yr += 30
+        # 第三行：竖向留白
+        self._label(p, '竖向留白', xr, yr)
+        self.ed_pad_y = self._ctl(hinst, 'EDIT', '', w32.ES_NUMBER,
+                                  xr + 64, yr - 2, 46, 24, p, 9112)
         yr += 24
-        self._label(p, '（横向=左右边距；竖向=上下边距\n'
-                       '行间距=每行之间；列间距=相邻列之间，px）', xr, yr, w=RW)
-        yr += 40
+        self._label(p, '（行高=每行高度；列宽=每列最小宽，0=按内容\n'
+                       '列间距=相邻列空白；横/竖留白=窗口边距，px）', xr, yr, w=RW)
+        yr += 44
 
         # ---- 显示方案（预设）：换方案立即生效，不用再点保存 ----
         self._label(p, '显示方案', xr, yr)
@@ -1461,12 +1466,12 @@ class SettingsWindow:
                     user32.EnableWindow(ctrl, 1)
 
     def _sync_pad(self):
-        """内部间距控件联动：自适应勾选框 → 4 个数字框的可用状态与展示值
+        """内部间距控件联动：自适应勾选框 → 5 个数字框的可用状态与展示值
 
-        - 自适应：数字框显示「按当前字号算出的真实间距」（只读），并禁用输入。
-        - 手动：数字框可编辑，显示用户设定的 padX / padY / rowGap / colGap。
-        ⚠️ 自适应开启时**必须禁用** 4 个框 —— 否则用户改了数字框也不会生效
-           （compute_pad 在 auto 模式下会忽略 padX/padY，造成「改了没反应」）。
+        - 自适应：数字框显示「按当前字号算出的真实值」（只读），并禁用输入。
+        - 手动：数字框可编辑，显示用户设定的 padX / padY / rowGap(行高) / colGap(列间距) / colWidth(列宽)。
+        ⚠️ 自适应开启时**必须禁用**这 5 个框 —— 否则用户改了数字框也不会生效
+           （compute_pad 在 auto 模式下会忽略 padX/padY/行高/列间距/列宽，造成「改了没反应」）。
         """
         try:
             cfg = self.app.cfg
@@ -1475,22 +1480,24 @@ class SettingsWindow:
             fs = self.app.widget.eff_font_size()
             if auto:
                 # 展示「当前字号下自适应算出的真实间距」，禁用手动编辑
-                px, py, rg, cg = compute_pad(cfg, fs)
+                px, py, rh, cg = compute_pad(cfg, fs)
                 self._set_text(self.ed_pad_x, str(px))
                 self._set_text(self.ed_pad_y, str(py))
-                self._set_text(self.ed_row_gap, str(rg))
+                self._set_text(self.ed_row_gap, str(rh))
                 self._set_text(self.ed_col_gap, str(cg))
-                for ctrl in (self.ed_pad_x, self.ed_pad_y,
-                             self.ed_row_gap, self.ed_col_gap):
+                self._set_text(self.ed_col_width, '0')   # 自适应下按内容定宽
+                for ctrl in (self.ed_pad_x, self.ed_pad_y, self.ed_row_gap,
+                             self.ed_col_gap, self.ed_col_width):
                     if ctrl and user32.IsWindow(ctrl):
                         user32.EnableWindow(ctrl, 0)
             else:
                 self._set_text(self.ed_pad_x, str(int(cfg.get('padX', 6) or 0)))
                 self._set_text(self.ed_pad_y, str(int(cfg.get('padY', 4) or 0)))
-                self._set_text(self.ed_row_gap, str(int(cfg.get('rowGap', 4) or 0)))
+                self._set_text(self.ed_row_gap, str(int(cfg.get('rowGap', 24) or 0)))
                 self._set_text(self.ed_col_gap, str(int(cfg.get('colGap', 6) or 0)))
-                for ctrl in (self.ed_pad_x, self.ed_pad_y,
-                             self.ed_row_gap, self.ed_col_gap):
+                self._set_text(self.ed_col_width, str(int(cfg.get('colWidth', 0) or 0)))
+                for ctrl in (self.ed_pad_x, self.ed_pad_y, self.ed_row_gap,
+                             self.ed_col_gap, self.ed_col_width):
                     if ctrl and user32.IsWindow(ctrl):
                         user32.EnableWindow(ctrl, 1)
         except Exception:  # noqa: BLE001
@@ -1556,7 +1563,7 @@ class SettingsWindow:
                     'fontSize', 'nameChars', 'upColor', 'downColor',
                     'showTableHead', 'showStatus', 'showHeader',
                     'showBorder', 'showGridLines', 'textOutline', 'bgTransparent',
-                    'padMode', 'padX', 'padY', 'rowGap', 'colGap')
+                    'padMode', 'padX', 'padY', 'rowGap', 'colGap', 'colWidth')
 
     def _default_display(self):
         """默认显示配置（方案没写到的键用这个兜底）"""
@@ -1616,17 +1623,18 @@ class SettingsWindow:
             d['nameChars'] = max(0, min(20, int(self._get_text(self.ed_name_chars) or 0)))
         except (TypeError, ValueError):
             d['nameChars'] = 0
-        # 内部间距：自适应 or 手动（4 维）
+        # 内部间距：自适应 or 手动（行高 / 列宽 / 列间距 / 横竖留白）
         auto = self._get_check(self.cb_pad_auto)
         d['padMode'] = 'auto' if auto else 'custom'
         if not auto:
-            for ctrl, key, dflt, hi in (
-                    (self.ed_pad_x, 'padX', 6, 80),
-                    (self.ed_pad_y, 'padY', 4, 60),
-                    (self.ed_row_gap, 'rowGap', 4, 40),
-                    (self.ed_col_gap, 'colGap', 6, 40)):
+            for ctrl, key, dflt, lo, hi in (
+                    (self.ed_pad_x, 'padX', 6, 0, 120),
+                    (self.ed_pad_y, 'padY', 4, 0, 120),
+                    (self.ed_row_gap, 'rowGap', 24, 16, 120),
+                    (self.ed_col_gap, 'colGap', 6, 0, 80),
+                    (self.ed_col_width, 'colWidth', 0, 0, 160)):
                 try:
-                    d[key] = max(0, min(hi, int(self._get_text(ctrl) or dflt)))
+                    d[key] = max(lo, min(hi, int(self._get_text(ctrl) or dflt)))
                 except (TypeError, ValueError):
                     d[key] = dflt
         return {k: v for k, v in d.items() if v is not None}
@@ -1803,18 +1811,19 @@ class SettingsWindow:
                 cfg['nameChars'] = max(0, min(20, int(self._get_text(self.ed_name_chars) or 0)))
             except (TypeError, ValueError):
                 pass
-            # 内部间距：自适应 or 手动（4 维：横向/竖向/行/列）
+            # 内部间距：自适应 or 手动（行高 / 列宽 / 列间距 / 横竖留白）
             if self._get_check(self.cb_pad_auto):
                 cfg['padMode'] = 'auto'
             else:
                 cfg['padMode'] = 'custom'
-                for ctrl, key, dflt, hi in (
-                        (self.ed_pad_x, 'padX', 6, 80),
-                        (self.ed_pad_y, 'padY', 4, 60),
-                        (self.ed_row_gap, 'rowGap', 4, 40),
-                        (self.ed_col_gap, 'colGap', 6, 40)):
+                for ctrl, key, dflt, lo, hi in (
+                        (self.ed_pad_x, 'padX', 6, 0, 120),
+                        (self.ed_pad_y, 'padY', 4, 0, 120),
+                        (self.ed_row_gap, 'rowGap', 24, 16, 120),
+                        (self.ed_col_gap, 'colGap', 6, 0, 80),
+                        (self.ed_col_width, 'colWidth', 0, 0, 160)):
                     try:
-                        cfg[key] = max(0, min(hi, int(self._get_text(ctrl) or dflt)))
+                        cfg[key] = max(lo, min(hi, int(self._get_text(ctrl) or dflt)))
                     except (TypeError, ValueError):
                         cfg[key] = dflt
             for combo, key in ((self.cb_up, 'upColor'), (self.cb_down, 'downColor')):
@@ -2025,18 +2034,19 @@ class SettingsWindow:
         cfg['autoSize'] = self._get_check(self.cb_autosize)
         cfg['showBorder'] = self._get_check(self.cb_border)
         cfg['showGridLines'] = self._get_check(self.cb_gridlines)
-        # 内部间距（4 维：横向/竖向/行/列）
+        # 内部间距（行高 / 列宽 / 列间距 / 横竖留白）
         if self._get_check(self.cb_pad_auto):
             cfg['padMode'] = 'auto'
         else:
             cfg['padMode'] = 'custom'
-            for ctrl, key, dflt, hi in (
-                    (self.ed_pad_x, 'padX', 6, 80),
-                    (self.ed_pad_y, 'padY', 4, 60),
-                    (self.ed_row_gap, 'rowGap', 4, 40),
-                    (self.ed_col_gap, 'colGap', 6, 40)):
+            for ctrl, key, dflt, lo, hi in (
+                    (self.ed_pad_x, 'padX', 6, 0, 120),
+                    (self.ed_pad_y, 'padY', 4, 0, 120),
+                    (self.ed_row_gap, 'rowGap', 24, 16, 120),
+                    (self.ed_col_gap, 'colGap', 6, 0, 80),
+                    (self.ed_col_width, 'colWidth', 0, 0, 160)):
                 try:
-                    cfg[key] = max(0, min(hi, int(self._get_text(ctrl) or dflt)))
+                    cfg[key] = max(lo, min(hi, int(self._get_text(ctrl) or dflt)))
                 except (TypeError, ValueError):
                     cfg[key] = dflt
 
@@ -2385,7 +2395,7 @@ class SettingsWindow:
             # 其它设置项的输入框 → 立即生效并自动保存
             for name in ('ed_name_chars', 'ed_interval', 'ed_width', 'ed_title',
                          'ed_config_dir', 'ed_backup_dir', 'ed_pad_x', 'ed_pad_y',
-                         'ed_row_gap', 'ed_col_gap'):
+                         'ed_row_gap', 'ed_col_gap', 'ed_col_width'):
                 ctrl = getattr(self, name, None)
                 if ctrl and lparam and int(lparam) == int(ctrl):
                     if name in ('ed_config_dir', 'ed_backup_dir'):
