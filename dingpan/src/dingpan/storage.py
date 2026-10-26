@@ -57,13 +57,17 @@ DEFAULT_CONFIG = {
     'textOutline': 'off',
     # 背景完全透明（勾上后背景 alpha = 0，滑块失效）
     'bgTransparent': False,
-    # 悬浮窗内部间距（内容区左右 / 上下留白，px）
-    # padMode: 'auto'（按字号自适应）/ 'custom'（手动设定 padX / padY）
-    # padX：横向内边距 —— 内容区左右各留多少 px（影响列布局与左右留白）
-    # padY：竖向内边距 + 行高增量 —— 每行上下各多留 padY 的空间（首末行与标题栏/状态栏也各留 padY）
+    # 悬浮窗内部间距（4 个维度，单位 px）
+    # padMode: 'auto'（按字号自适应，4 维一起算）/ 'custom'（手动设定下面 4 项）
+    # padX   ：横向外边距 —— 内容区左右各留多少 px（影响列布局与左右留白）
+    # padY   ：竖向外边距 —— 首末行与标题栏/状态栏各留多少 px
+    # rowGap ：行间距 —— 每行之间额外多留多少 px（加在行高上）
+    # colGap ：列间距 —— 相邻两列之间留多少 px（名称列↔价格列等）
     'padMode': 'auto',
     'padX': 6,
     'padY': 4,
+    'rowGap': 4,
+    'colGap': 6,
     # 存储位置：空 = 用默认（主程序文件夹内）
     'configDir': '',
     'backupDir': '',

@@ -17,28 +17,38 @@ C_TRANSPARENT = 0x00000000
 
 
 def compute_pad(cfg, fs):
-    """算出悬浮窗的内部间距 (padX, padY)，单位 px。
+    """算出悬浮窗的内部间距 (padX, padY, rowGap, colGap)，单位 px。
 
     - auto  模式：随字号自适应（大字号留白更多，不会挤；小字号更紧凑）。
-    - custom 模式：用用户设定的 padX / padY（各夹紧到 0~40）。
+    - custom 模式：用用户设定的 4 个值（各夹紧到合理上限）。
 
-    padX = 内容区左右内边距（每侧）；padY = 内容区上下内边距（每侧）+ 行高增量。
+    padX    = 内容区左右外边距（每侧）
+    padY    = 内容区上下外边距（每侧）
+    rowGap  = 每行之间的额外竖向间距（加在行高上）
+    colGap  = 相邻两列之间的横向间距（名称列↔价格列等）
     """
     mode = str(cfg.get('padMode', 'auto')).lower()
+
+    def _cint(key, dflt, lo, hi):
+        try:
+            return max(lo, min(hi, int(cfg.get(key, dflt) or dflt)))
+        except (TypeError, ValueError):
+            return dflt
+
     if mode == 'custom':
-        try:
-            px = max(0, min(40, int(cfg.get('padX', 6) or 0)))
-        except (TypeError, ValueError):
-            px = 6
-        try:
-            py = max(0, min(40, int(cfg.get('padY', 4) or 0)))
-        except (TypeError, ValueError):
-            py = 4
-        return px, py
-    # auto：随字号缩放（约 0.5×字号 横向 / 0.25×字号 竖向）
-    px = max(2, min(16, int(round(fs * 0.5))))
-    py = max(0, min(10, int(round(fs * 0.25))))
-    return px, py
+        px = _cint('padX', 6, 0, 80)
+        py = _cint('padY', 4, 0, 60)
+        rg = _cint('rowGap', 4, 0, 40)
+        cg = _cint('colGap', 6, 0, 40)
+        return px, py, rg, cg
+    # auto：随字号缩放
+    #   横向边距 ≈ 0.5×字号；竖向边距 ≈ 0.25×字号；
+    #   行间距   ≈ 0.20×字号；列间距   ≈ 0.35×字号（名称↔价格之间更明显）
+    px = max(2, min(20, int(round(fs * 0.5))))
+    py = max(0, min(12, int(round(fs * 0.25))))
+    rg = max(0, min(12, int(round(fs * 0.20))))
+    cg = max(2, min(16, int(round(fs * 0.35))))
+    return px, py, rg, cg
 
 
 class Theme:
@@ -273,22 +283,35 @@ class Widget:
         return r.right - r.left, r.bottom - r.top
 
     def _pad(self):
-        """当前内部间距 (padX, padY)，见 compute_pad 的说明"""
+        """当前内部间距 (padX, padY, rowGap, colGap)，见 compute_pad 的说明"""
         return compute_pad(self.cfg, self.eff_font_size())
 
+    def _pad_x(self):
+        return compute_pad(self.cfg, self.eff_font_size())[0]
+
+    def _pad_y(self):
+        return compute_pad(self.cfg, self.eff_font_size())[1]
+
+    def _row_gap(self):
+        return compute_pad(self.cfg, self.eff_font_size())[2]
+
+    def _col_gap(self):
+        return compute_pad(self.cfg, self.eff_font_size())[3]
+
     def row_height(self, fs=None):
-        """单行高度 = 行内文字高度 + 竖向内边距（padY）"""
+        """单行高度 = 行内文字高度 + 行间距（rowGap）"""
         fs = fs if fs is not None else self.eff_font_size()
-        _, padY = self._pad()
+        rg = self._row_gap()
         if self.name_row_two_line():
-            return max(24, int(fs * 2.15)) + padY
-        return max(18, int(fs * 1.55)) + padY
+            return max(24, int(fs * 2.15)) + rg
+        return max(18, int(fs * 1.55)) + rg
 
     def layout(self):
         """计算各区域高度"""
         w, h = self.client_size()
         fs = self.eff_font_size()
-        padX, padY = self._pad()
+        padX = self._pad_x()
+        padY = self._pad_y()
         show = self.cfg.get('showHeader', True)
         self.header_h = max(26, int(28 * self.dpi_scale)) if show else 0
         self.tabs_h = (max(22, int(24 * self.dpi_scale)) if show else 0)
@@ -297,7 +320,7 @@ class Widget:
         self.row_h = self.row_height(fs)
         head_h = (fs + 5) if self.cfg.get('showTableHead', True) else 0
         self.head_h = head_h
-        # 上下内边距：内容区与标题栏/状态栏各留 padY
+        # 上下内边距：内容区与标题栏/状态栏各留 padY（行间距已算进 row_h）
         body_top = self.header_h + self.tabs_h + head_h + padY
         self.body_bottom = max(body_top, h - self.status_h - padY)
         self.body_h = max(40, self.body_bottom - body_top)
@@ -343,12 +366,15 @@ class Widget:
     MAX_VISIBLE_ROWS = 30      # 自适应时最多展开多少行，超出就滚动
 
     def content_width(self):
-        """内容需要的总宽度（各列自然宽度之和 + 左右内边距）"""
+        """内容需要的总宽度（各列自然宽度之和 + 左右内边距 + 列间间距）"""
         natural, _mins = self.measure_columns()
         if not natural:
             return 320
-        padX, _ = self._pad()
-        return sum(natural) + padX * 2
+        padX = self._pad_x()
+        colGap = self._col_gap()
+        n = len(natural)
+        gap = colGap * (n - 1) if n > 1 else 0
+        return sum(natural) + padX * 2 + gap
 
     def row_count(self):
         """当前分组有多少只自选股"""
@@ -362,11 +388,12 @@ class Widget:
     def needed_size(self):
         """窗口「按内容自适应」时应有的尺寸 (宽, 高)
 
-        宽 = 各列自然宽度之和 + 左右内边距
+        宽 = 各列自然宽度之和 + 左右内边距 + 列间间距
         高 = 标题栏 + 分组标签 + 列表表头 + 可见行数×行高 + 状态栏 + 上下内边距
         """
         fs = self.eff_font_size()
-        padX, padY = self._pad()
+        padX = self._pad_x()
+        padY = self._pad_y()
         show = self.cfg.get('showHeader', True)
         header_h = max(26, int(28 * self.dpi_scale)) if show else 0
         tabs_h = (max(22, int(24 * self.dpi_scale)) if show else 0)
@@ -504,16 +531,19 @@ class Widget:
     def column_widths(self, total_w):
         """按实际文本测量自适应列宽；剩余空间全部给名称列"""
         eff, mode = self.col_plan()
+        padX = self._pad_x()
+        colGap = self._col_gap()
+        n = len(eff)
+        gap_total = colGap * (n - 1) if n > 1 else 0
         cache_key = (total_w, tuple(eff), mode, self.eff_font_size(),
-                     self.app.group_index(), len(self.quotes))
+                     self.app.group_index(), len(self.quotes), padX, colGap)
         if self._wkey == cache_key and self._wval is not None:
             return self._wval
         defs = [COLUMN_MAP[c] for c in eff]
         if not defs:
             self._wkey, self._wval = cache_key, []
             return []
-        padX, _ = self._pad()
-        pad = padX * 2
+        pad = padX * 2 + gap_total
         avail = max(120, total_w - pad)
         natural, mins = self.measure_columns()
 
@@ -627,7 +657,7 @@ class Widget:
         groups = self.cfg.get('groups') or []
         if not groups:
             return []
-        padX, _ = self._pad()
+        padX = self._pad_x()
         items = []
         x = padX
         for i, g in enumerate(groups):
@@ -700,7 +730,6 @@ class Widget:
         if self.cfg.get('showTableHead', True):
             self._draw_table_head(dc, w, fs)
         self._draw_rows(dc, w, fs)
-        self._draw_scrollbar(dc, w)
         if self.cfg.get('showStatus', True):
             self._draw_status(dc, w, h, fs)
         # 右下角缩放提示（三个小方块）
@@ -1145,7 +1174,7 @@ class Widget:
         self.head_y = y
         if not self.cfg.get('showTableHead', True):
             return
-        padX, _ = self._pad()
+        padX, _, _, colGap = self._pad()
         eff, _mode = self.col_plan()
         defs = [COLUMN_MAP[c] for c in eff]
         widths = self.column_widths(w)
@@ -1157,7 +1186,7 @@ class Widget:
             cw = widths[i]
             self._text(dc, d[1], x + cw - 4, y + 2, t.dim, small,
                        align='right' if d[3] == 'right' else 'left', max_w=cw - 6)
-            x += cw
+            x += cw + colGap
         if self.cfg.get('showGridLines', True):
             line = gdi32.CreateSolidBrush(t.border)
             r = wintypes.RECT(padX, y + fs + 3, w - padX, y + fs + 4)
@@ -1167,7 +1196,7 @@ class Widget:
     def _draw_rows(self, dc, w, fs):
         t = self.theme
         head_y = self.header_h + self.tabs_h
-        padX, padY = self._pad()
+        padX, padY, _, colGap = self._pad()
         # 内容区顶部内边距：表头下沿 + padY；表头隐藏时仍保留 4px 最小间隙
         y0 = head_y + self.head_h + padY + (4 if not self.head_h else 0)
         groups = self.cfg.get('groups') or []
@@ -1239,25 +1268,8 @@ class Widget:
                     f = small if key == 'time' else normal
                     self._text(dc, val, x + cw - 4, ry + (self.row_h - fs) // 2 - 1,
                                color, f, align='right', max_w=cw - 6)
+                x += cw + colGap
                 x += cw
-
-    def _draw_scrollbar(self, dc, w):
-        """自选太多时右侧画一条细滚动条，给个「还有更多」的视觉反馈"""
-        if self.max_scroll <= 0 or self.body_h <= 0:
-            return
-        visible = max(1, getattr(self, '_visible_rows', 1))
-        _, padY = self._pad()
-        head_y = self.header_h + self.tabs_h
-        rows_top = head_y + self.head_h + padY + (4 if not self.head_h else 0)
-        total = self.max_scroll + visible
-        track_h = max(10, min(self.body_h, max(10, self.body_bottom - rows_top)))
-        thumb_h = max(18, int(track_h * visible / max(1, total)))
-        span = max(1, track_h - thumb_h)
-        top = rows_top + int(span * self.scroll / max(1, self.max_scroll))
-        br = gdi32.CreateSolidBrush(self.theme.dim)
-        r = wintypes.RECT(w - 3, top, w - 1, top + thumb_h)
-        user32.FillRect(dc, ctypes.byref(r), br)
-        gdi32.DeleteObject(br)
 
     def _cell_value(self, q, key):
         t = self.theme
