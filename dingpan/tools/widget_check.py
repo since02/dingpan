@@ -194,8 +194,8 @@ def main():
     wd4.cfg = cfg
     wd4.layout()
     check('关掉状态栏 → 状态栏高度为 0', wd4.status_h == 0, str(wd4.status_h))
-    check('关掉状态栏 → 底部区域让给数据区',
-          wd4.body_bottom == 400, 'body_bottom=%s' % wd4.body_bottom)
+    check('关掉状态栏 → 底部区域让给数据区（窗口底 - 竖向留白）',
+          wd4.body_bottom == 400 - wd4._pad_y(), 'body_bottom=%s' % wd4.body_bottom)
 
     cfg['showTableHead'] = False
     wd4.cfg = cfg
