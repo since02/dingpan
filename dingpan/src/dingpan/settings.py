@@ -11,7 +11,7 @@ from ctypes import wintypes
 from . import win32 as w32
 from . import storage, quotes
 from .win32 import gdi32, user32, kernel32
-from .widget import COLUMN_DEFS, COLUMN_MAP
+from .widget import COLUMN_DEFS, COLUMN_MAP, compute_pad
 from . import dialogs
 
 WM_SETTINGSCREATED = w32.WM_USER + 40
@@ -604,6 +604,20 @@ class SettingsWindow:
                                      w32.BS_AUTOCHECKBOX, xr, yr, RW, 24, p, 9107)
         yr += 36
 
+        # ---- 内部间距（横向 / 竖向，可自适应或手动）----
+        self._label(p, '内部间距', xr, yr)
+        self.cb_pad_auto = self._ctl(hinst, 'BUTTON', '间距随字号自适应',
+                                     w32.BS_AUTOCHECKBOX, xr, yr + 22, RW, 24, p, 9110)
+        yr += 50
+        self._label(p, '横向', xr, yr)
+        self.ed_pad_x = self._ctl(hinst, 'EDIT', '', w32.ES_NUMBER,
+                                  xr + 36, yr - 2, 50, 24, p, 9111)
+        self._label(p, '竖向', xr + 104, yr)
+        self.ed_pad_y = self._ctl(hinst, 'EDIT', '', w32.ES_NUMBER,
+                                  xr + 140, yr - 2, 50, 24, p, 9112)
+        self._label(p, '（左右 / 上下内边距，px）', xr + 200, yr + 3, w=120)
+        yr += 32
+
         # ---- 显示方案（预设）：换方案立即生效，不用再点保存 ----
         self._label(p, '显示方案', xr, yr)
         yr += 22
@@ -887,6 +901,8 @@ class SettingsWindow:
         down = cfg.get('downColor', '#0ecb81')
         self._select_color_combo(self.cb_up, up)
         self._select_color_combo(self.cb_down, down)
+        # 内部间距控件（自适应 / 手动联动）
+        self._sync_pad()
 
         # WebDAV
         w = cfg.get('webdav') or {}
@@ -1432,6 +1448,34 @@ class SettingsWindow:
                 if on and ctrl == self.ed_quote_url:
                     user32.EnableWindow(ctrl, 1)
 
+    def _sync_pad(self):
+        """内部间距控件联动：自适应勾选框 → 两个数字框的可用状态与展示值
+
+        - 自适应：数字框显示「按当前字号算出的实际间距」（只读），并禁用输入。
+        - 手动：数字框可编辑，显示用户设定的 padX / padY。
+        """
+        try:
+            cfg = self.app.cfg
+            auto = str(cfg.get('padMode', 'auto')).lower() != 'custom'
+            self._set_check(self.cb_pad_auto, auto)
+            fs = self.app.widget.eff_font_size()
+            if auto:
+                # 展示「当前字号下自适应算出的真实间距」，禁用手动编辑
+                px, py = compute_pad(cfg, fs)
+                self._set_text(self.ed_pad_x, str(px))
+                self._set_text(self.ed_pad_y, str(py))
+                for ctrl in (self.ed_pad_x, self.ed_pad_y):
+                    if ctrl and user32.IsWindow(ctrl):
+                        user32.EnableWindow(ctrl, 0)
+            else:
+                self._set_text(self.ed_pad_x, str(int(cfg.get('padX', 6) or 0)))
+                self._set_text(self.ed_pad_y, str(int(cfg.get('padY', 4) or 0)))
+                for ctrl in (self.ed_pad_x, self.ed_pad_y):
+                    if ctrl and user32.IsWindow(ctrl):
+                        user32.EnableWindow(ctrl, 1)
+        except Exception:  # noqa: BLE001
+            pass
+
     def _custom_spec_now(self):
         """从界面上读出自定义数据源配置"""
         enc_i = self._get_combo_sel(self.cb_cust_enc)
@@ -1491,7 +1535,8 @@ class SettingsWindow:
     DISPLAY_KEYS = ('theme', 'customBg', 'customText', 'bgAlpha', 'textAlpha',
                     'fontSize', 'nameChars', 'upColor', 'downColor',
                     'showTableHead', 'showStatus', 'showHeader',
-                    'showBorder', 'showGridLines', 'textOutline', 'bgTransparent')
+                    'showBorder', 'showGridLines', 'textOutline', 'bgTransparent',
+                    'padMode', 'padX', 'padY')
 
     def _default_display(self):
         """默认显示配置（方案没写到的键用这个兜底）"""
@@ -1551,6 +1596,18 @@ class SettingsWindow:
             d['nameChars'] = max(0, min(20, int(self._get_text(self.ed_name_chars) or 0)))
         except (TypeError, ValueError):
             d['nameChars'] = 0
+        # 内部间距：自适应 or 手动
+        auto = self._get_check(self.cb_pad_auto)
+        d['padMode'] = 'auto' if auto else 'custom'
+        if not auto:
+            try:
+                d['padX'] = max(0, min(40, int(self._get_text(self.ed_pad_x) or 6)))
+            except (TypeError, ValueError):
+                d['padX'] = 6
+            try:
+                d['padY'] = max(0, min(40, int(self._get_text(self.ed_pad_y) or 4)))
+            except (TypeError, ValueError):
+                d['padY'] = 4
         return {k: v for k, v in d.items() if v is not None}
 
     def _apply_display(self, disp):
@@ -1569,6 +1626,8 @@ class SettingsWindow:
             v = self.app.cfg.get(key)
             if v:
                 self._select_color_combo(combo, v)
+        # 内部间距控件（自适应 / 手动）跟着套用
+        self._sync_pad()
 
     def _fill_preset_combo(self, select_name=''):
         presets = self._presets()
@@ -1723,6 +1782,19 @@ class SettingsWindow:
                 cfg['nameChars'] = max(0, min(20, int(self._get_text(self.ed_name_chars) or 0)))
             except (TypeError, ValueError):
                 pass
+            # 内部间距：自适应 or 手动
+            if self._get_check(self.cb_pad_auto):
+                cfg['padMode'] = 'auto'
+            else:
+                cfg['padMode'] = 'custom'
+                try:
+                    cfg['padX'] = max(0, min(40, int(self._get_text(self.ed_pad_x) or 6)))
+                except (TypeError, ValueError):
+                    pass
+                try:
+                    cfg['padY'] = max(0, min(40, int(self._get_text(self.ed_pad_y) or 4)))
+                except (TypeError, ValueError):
+                    pass
             for combo, key in ((self.cb_up, 'upColor'), (self.cb_down, 'downColor')):
                 v = self._combo_color(combo)
                 if v:
@@ -1931,6 +2003,19 @@ class SettingsWindow:
         cfg['autoSize'] = self._get_check(self.cb_autosize)
         cfg['showBorder'] = self._get_check(self.cb_border)
         cfg['showGridLines'] = self._get_check(self.cb_gridlines)
+        # 内部间距
+        if self._get_check(self.cb_pad_auto):
+            cfg['padMode'] = 'auto'
+        else:
+            cfg['padMode'] = 'custom'
+            try:
+                cfg['padX'] = max(0, min(40, int(self._get_text(self.ed_pad_x) or 6)))
+            except (TypeError, ValueError):
+                cfg['padX'] = 6
+            try:
+                cfg['padY'] = max(0, min(40, int(self._get_text(self.ed_pad_y) or 4)))
+            except (TypeError, ValueError):
+                cfg['padY'] = 4
 
         # 行情页平台
         pid = self._get_combo_sel(self.cb_quote_platform)
@@ -2276,7 +2361,7 @@ class SettingsWindow:
                 return
             # 其它设置项的输入框 → 立即生效并自动保存
             for name in ('ed_name_chars', 'ed_interval', 'ed_width', 'ed_title',
-                         'ed_config_dir', 'ed_backup_dir'):
+                         'ed_config_dir', 'ed_backup_dir', 'ed_pad_x', 'ed_pad_y'):
                 ctrl = getattr(self, name, None)
                 if ctrl and lparam and int(lparam) == int(ctrl):
                     if name in ('ed_config_dir', 'ed_backup_dir'):
@@ -2341,6 +2426,13 @@ class SettingsWindow:
             return
         # 显示相关的复选框：勾一下就立刻反映到悬浮窗
         if code == 0:               # BN_CLICKED
+            # 「内部间距」自适应勾选框：切换后立即联动数字框 + 重算展示值
+            cpa = getattr(self, 'cb_pad_auto', None)
+            if cpa and lparam and int(lparam) == int(cpa):
+                self.app.cfg['padMode'] = 'auto' if self._get_check(cpa) else 'custom'
+                self._sync_pad()
+                self._apply_change()
+                return
             # 「背景透明」：它只是背景滑块在 0% 位置的快捷方式。
             # 勾上 → 滑块拉到 0（完全透明）；取消 → 滑块回到上次非 0 的值。
             # （之前是「勾上就禁用滑块」，用户反馈「背景透明度调整完全没用了」）
