@@ -90,6 +90,32 @@ def normalize_code(code):
     return raw
 
 
+def price_decimals(code):
+    """某证券的报价小数位数（东方财富缩放 & 显示格式化的统一依据）。
+
+    A 股股票/科创板/北交所 = 2 位；场内基金/ETF/LOF/可转债/国债/港股 = 3 位。
+    - 东方财富把价格按 10^小数位 放大返回（股票×100、基金×1000）→ 要 ÷10^dec 还原；
+    - 盯盘窗口对基金/可转债/港股要显示 3 位小数，股票显示 2 位。
+    """
+    c = (code or '').lower()
+    if c.startswith('hk'):
+        return 3
+    if c.startswith('us'):
+        return 2
+    digits = re.sub(r'^[a-z]+', '', c)
+    if len(digits) != 6:
+        return 2
+    if c.startswith('sh'):
+        # 5xxxxx 基金/ETF/LOF/REITs；11xxxxx 可转债；9xxxxx 沪市B股 → 3 位
+        return 3 if digits[0] in '159' else 2
+    if c.startswith('sz'):
+        # 1xxxxx 基金/ETF/LOF/可转债/国债；20xxxxx 深市B股 → 3 位
+        return 3 if digits[0] in '12' else 2
+    if c.startswith('bj'):
+        return 2  # 北交所股票 2 位
+    return 2
+
+
 _CODE_RE = re.compile(r'^(?:(sh|sz|bj|hk|us)\.?)?(\d{5,6})(?:\.(sh|sz|bj|hk|us))?$', re.I)
 # 美股代码（字母）：只在明确带 us 前缀时认，避免把普通英文单词当代码
 _US_CODE_RE = re.compile(r'^us\.?([a-z]{1,6})$', re.I)
@@ -164,14 +190,12 @@ def _fmt_unix(ts):
 
 
 # ============================== 腾讯 qt.gtimg.cn ==============================
-def fetch_tencent(codes):
-    """GBK 编码。字段：1名称 3现价 4昨收 5今开 6成交量 30时间 31涨跌 32涨跌幅
-    33最高 34最低 37成交额(万) 38换手率 39市盈 43振幅 44流通市值 45总市值 46市净"""
-    lst = [c for c in (normalize_code(x) for x in codes) if c]
-    if not lst:
-        return {}
-    url = 'https://qt.gtimg.cn/q=' + ','.join(lst)
-    _, text = http_get(url, encoding='gbk')
+def parse_tencent_body(text):
+    """从腾讯接口返回文本里解析出行情 dict（与网络无关，便于单测）。
+
+    字段：1名称 3现价 4昨收 5今开 6成交量 30时间 31涨跌 32涨跌幅
+    33最高 34最低 37成交额 38换手率 39市盈 43振幅 44流通市值 45总市值 46市净
+    """
     out = {}
     for m in re.finditer(r'v_([a-z]{2}\d{5,6})="([^"]*)"', text):
         code, body = m.group(1), m.group(2)
@@ -191,15 +215,22 @@ def fetch_tencent(codes):
     return out
 
 
-# ============================== 新浪 hq.sinajs.cn ==============================
-def fetch_sina(codes):
-    """需 Referer；list= 后不可追加参数；仅支持沪深"""
-    lst = [c for c in (normalize_code(x) for x in codes)
-           if c and (c.startswith('sh') or c.startswith('sz'))]
+def fetch_tencent(codes):
+    lst = [c for c in (normalize_code(x) for x in codes) if c]
     if not lst:
         return {}
-    url = 'https://hq.sinajs.cn/list=' + ','.join(lst)
-    _, text = http_get(url, headers={'Referer': 'https://finance.sina.com.cn/'}, encoding='gbk')
+    url = 'https://qt.gtimg.cn/q=' + ','.join(lst)
+    _, text = http_get(url, encoding='gbk')
+    return parse_tencent_body(text)
+
+
+# ============================== 新浪 hq.sinajs.cn ==============================
+def parse_sina_body(text):
+    """从新浪接口返回文本里解析出行情 dict（与网络无关，便于单测）。
+
+    仅沪深；字段：0名称 1今开 2昨收 3现价 4最高 5最低 8成交量(股) 9成交额(元)
+    30日期 31时间。涨跌额按证券小数位取舍，避免基金类丢第 3 位。
+    """
     out = {}
     for m in re.finditer(r'var hq_str_([a-z]{2}\d{5,6})="([^"]*)"', text):
         code, body = m.group(1), m.group(2)
@@ -207,7 +238,7 @@ def fetch_sina(codes):
         if len(f) < 10:
             continue
         price, prev = num(f[3]), num(f[2])
-        change = round(price - prev, 2) if (price is not None and prev) else None
+        change = round(price - prev, price_decimals(code)) if (price is not None and prev) else None
         pct = round((price - prev) / prev * 100, 2) if (price is not None and prev) else None
         hi, lo = num(f[4]), num(f[5])
         amp = round((hi - lo) / prev * 100, 2) if (hi is not None and lo is not None and prev) else None
@@ -224,6 +255,17 @@ def fetch_sina(codes):
             'source': 'sina',
         }
     return out
+
+
+def fetch_sina(codes):
+    """需 Referer；list= 后不可追加参数；仅支持沪深"""
+    lst = [c for c in (normalize_code(x) for x in codes)
+           if c and (c.startswith('sh') or c.startswith('sz'))]
+    if not lst:
+        return {}
+    url = 'https://hq.sinajs.cn/list=' + ','.join(lst)
+    _, text = http_get(url, headers={'Referer': 'https://finance.sina.com.cn/'}, encoding='gbk')
+    return parse_sina_body(text)
 
 
 # ========================= 东方财富 push2.eastmoney.com =========================
@@ -256,30 +298,49 @@ def _fetch_em_once(codes, host_idx):
     diff = (payload or {}).get('data', {}).get('diff') or []
     out = {}
 
-    def scale(v):
+    for d in diff:
+        rec = _parse_em_item(d)
+        if rec:
+            out[rec['code']] = rec
+    return out
+
+
+def _parse_em_item(d):
+    """把东方财富单条 diff 解析成统一结构。
+
+    关键：东财把价格按 10^小数位 放大返回 —— A 股 2 位（×100）、场内基金/ETF/LOF/
+    可转债/国债/港股 3 位（×1000）。价格类字段(f2/f4/f15/f16/f17/f18)要 ÷10^dec 还原；
+    百分比/比率类(f3 涨跌幅/f8 换手率/f9 市盈/f10 振幅)是 ×100，÷100 即可。
+    """
+    cn = str(d.get('f12') or '')
+    if not cn:
+        return None
+    mkt = {0: 'sz', 1: 'sh'}.get(d.get('f13'), 'bj')
+    code = mkt + cn
+    dec = price_decimals(code)
+
+    def P(v):  # 价格类：÷10^小数位
+        n = num(v)
+        return None if n is None else round(n / (10 ** dec), dec)
+
+    def R(v):  # 百分比/比率类：÷100
         n = num(v)
         return None if n is None else round(n / 100, 2)
 
-    for d in diff:
-        cn = str(d.get('f12') or '')
-        if not cn:
-            continue
-        mkt = {0: 'sz', 1: 'sh'}.get(d.get('f13'), 'bj')
-        out[mkt + cn] = {
-            'code': mkt + cn, 'name': d.get('f14') or '',
-            'price': scale(d.get('f2')), 'prevClose': scale(d.get('f18')),
-            'open': scale(d.get('f17')), 'volume': num(d.get('f5')),
-            'amount': round(num(d['f6']) / 10000, 2) if num(d.get('f6')) else None,
-            'time': _fmt_unix(d.get('f124')),
-            'change': scale(d.get('f4')), 'changePct': scale(d.get('f3')),
-            'high': scale(d.get('f15')), 'low': scale(d.get('f16')),
-            'turnover': scale(d.get('f8')), 'pe': scale(d.get('f9')),
-            'amplitude': scale(d.get('f10')),
-            'floatCap': None,
-            'totalCap': round(num(d['f20']) / 1e8, 2) if num(d.get('f20')) else None,
-            'pb': None, 'source': 'eastmoney',
-        }
-    return out
+    return {
+        'code': code, 'name': d.get('f14') or '',
+        'price': P(d.get('f2')), 'prevClose': P(d.get('f18')),
+        'open': P(d.get('f17')), 'volume': num(d.get('f5')),
+        'amount': round(num(d.get('f6')) / 10000, 2) if num(d.get('f6')) else None,
+        'time': _fmt_unix(d.get('f124')),
+        'change': P(d.get('f4')), 'changePct': R(d.get('f3')),
+        'high': P(d.get('f15')), 'low': P(d.get('f16')),
+        'turnover': R(d.get('f8')), 'pe': R(d.get('f9')),
+        'amplitude': R(d.get('f10')),
+        'floatCap': None,
+        'totalCap': round(num(d.get('f20')) / 1e8, 2) if num(d.get('f20')) else None,
+        'pb': None, 'source': 'eastmoney',
+    }
 
 
 def fetch_eastmoney(codes):

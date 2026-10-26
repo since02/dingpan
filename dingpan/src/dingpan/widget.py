@@ -10,6 +10,7 @@ from ctypes import wintypes
 
 from . import win32 as w32
 from .win32 import (gdi32, user32, ctypes as _ct)
+from .quotes import price_decimals
 
 # 颜色（COLORREF）
 C_TRANSPARENT = 0x00000000
@@ -1216,12 +1217,14 @@ class Widget:
     def _cell_value(self, q, key):
         t = self.theme
         v = q.get(key)
+        dec = price_decimals(q.get('code'))   # 股票 2 位；基金/ETF/可转债/港股 3 位
         if key in ('change', 'changePct'):
             if v is None:
                 return '--', t.flat
-            s = ('+' if v > 0 else '') + f'{v:.2f}' + ('%' if key == 'changePct' else '')
             c = t.up if v > 0 else (t.down if v < 0 else t.flat)
-            return s, c
+            if key == 'changePct':
+                return ('+' if v > 0 else '') + f'{v:.2f}%', c
+            return ('+' if v > 0 else '') + f'{v:.{dec}f}', c
         if key == 'price':
             if v is None:
                 return '--', t.flat
@@ -1232,7 +1235,11 @@ class Widget:
                     c = t.up
                 elif v < pc:
                     c = t.down
-            return f'{v:.2f}', c
+            return f'{v:.{dec}f}', c
+        if key in ('prevClose', 'open', 'high', 'low'):
+            if v is None:
+                return '--', t.flat
+            return f'{v:.{dec}f}', t.text
         if key in ('volume', 'amount', 'floatCap', 'totalCap'):
             if v is None:
                 return '--', t.dim
