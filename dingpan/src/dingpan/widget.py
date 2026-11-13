@@ -408,6 +408,10 @@ class Widget:
         h = header_h + tabs_h + head_h + rows * row_h + status_h
         # 上下内边距（top + bottom）
         h += padY * 2
+        # ⚠️ 安全余量：分层窗口 / DPI 缩放下，SetWindowPos 设的窗口尺寸与
+        #    实际客户区可能有 1~2px 偏差，曾导致末行（如工商银行）被裁掉。
+        #    这里多留约 1/4 行高的余量，保证最后一行完整可见。
+        h += max(4, int(row_h * 0.25))
         w = max(220, min(self.content_width(), 1600))
         return w, max(120, h)
 
@@ -1214,8 +1218,11 @@ class Widget:
         t = self.theme
         head_y = self.header_h + self.tabs_h
         padX, padY, _, colGap = self._pad()
-        # 内容区顶部内边距：表头下沿 + padY；表头隐藏时仍保留 4px 最小间隙
-        y0 = head_y + self.head_h + padY + (4 if not self.head_h else 0)
+        # 内容区顶部内边距：表头下沿 + padY。
+        # ⚠️ 原先这里在「表头隐藏」时额外 +4，但 body_bottom 没同步 +4，
+        #   导致最后一行被多挤 4px → 末行（如工商银行）在悬浮窗里整行被裁掉。
+        #   现在 y0 与 body_top 严格一致（仅 padY 提供间隙），末行必定完整画出。
+        y0 = head_y + self.head_h + padY
         groups = self.cfg.get('groups') or []
         idx = self.app.group_index()
         stocks = groups[idx].get('stocks', []) if 0 <= idx < len(groups) else []
@@ -1246,7 +1253,10 @@ class Widget:
 
         for i in range(self.scroll, len(stocks)):
             ry = y0 + (i - self.scroll) * self.row_h
-            if ry + self.row_h > self.body_bottom:
+            # ⚠️ 只裁掉「整行都已超出底部」的行；末行即使只有 1px 露出来也要画，
+            #    否则最后一只自选股（例如工商银行）会整行消失、且取消它勾选后
+            #    上一行（中国平安）又变成新的末行被裁掉 —— 用户反馈的「勾选没显示全」。
+            if ry >= self.body_bottom:
                 break
             stock = stocks[i]
             q = self.quotes.get(stock.get('code'), {})

@@ -258,6 +258,39 @@ def main():
         if w.hwnd:
             user32.DestroyWindow(w.hwnd)
 
+    print('\n=== 7. 末行不裁切（模拟客户区少 1~3px 的真实偏差）===')
+    # 真实分层窗口 / DPI 缩放下，SetWindowPos 设的窗口尺寸与实际客户区可能差 1~3px，
+    # 旧代码用 ry+row_h > body_bottom 裁切，会把最后一行（如工商银行）整行裁掉；
+    # 新代码用 ry >= body_bottom，末行即使只露 1px 也画出来。
+    for n in (14, 15, 16, 20):
+        c = json.loads(json.dumps(base))
+        c['groups'] = [{'id': 'g', 'name': '默认',
+                        'stocks': [{'code': 'sh%06d' % i, 'name': '股票%d' % i,
+                                    'enabled': True} for i in range(n)]}]
+        c['columns'] = ['name', 'price', 'change', 'changePct']
+        w = make_widget(c, 420, 800)
+        w.quotes = {}
+        ww, hh = w.needed_size()
+        # 用真实窗口按 needed_size 设尺寸
+        user32.SetWindowPos(w.hwnd, None, 0, 0, ww, hh, 0x0004 | 0x0010)
+        w.layout()
+        for sf in (0, 1, 2, 3):
+            w.body_bottom -= sf          # 模拟客户区少 sf 像素
+            w.scroll = 0
+            w.rows = []
+            dc = user32.GetDC(w.hwnd)
+            try:
+                w._draw_rows(dc, ww, w.eff_font_size())
+            finally:
+                user32.ReleaseDC(w.hwnd, dc)
+            drawn = len(w.rows)
+            last = w.rows[-1][0] if w.rows else None
+            check('n=%d 偏差%dpx → 末行仍画出' % (n, sf),
+                  drawn == n and last == n - 1,
+                  'drawn=%s last=%s' % (drawn, last))
+            w.body_bottom += sf            # 还原
+        user32.DestroyWindow(w.hwnd)
+
     print('\n结果: %s' % ('全部通过' if not FAILS else '失败 %d 项 -> %s' % (len(FAILS), FAILS)))
     return 1 if FAILS else 0
 
