@@ -549,10 +549,20 @@ class App:
 
         - 左键 / 回车 → 显示或隐藏悬浮窗
         - 右键 → 弹出托盘菜单
+
+        ⚠️ version 4 下，一次物理左键点击可能**同时**投递 NIN_SELECT 与 WM_LBUTTONUP
+           （甚至 WM_LBUTTONDBLCLK），导致 set_visible 被 toggle 两次 → 窗口「闪一下又隐藏」。
+           → 用 0.35s 防抖：同一物理动作内的重复通知只生效一次。
         """
         notify = lparam & 0xFFFF
         if notify in (w32.WM_LBUTTONUP, w32.WM_LBUTTONDBLCLK,
                       w32.NIN_SELECT, w32.NIN_KEYSELECT):
+            import time as _time
+            now = _time.monotonic()
+            last = getattr(self, '_last_tray_toggle', 0.0)
+            if last and (now - last) < 0.35:
+                return
+            self._last_tray_toggle = now
             self.set_visible(not user32.IsWindowVisible(self.hwnd))
         elif notify in (w32.WM_RBUTTONUP, w32.WM_CONTEXTMENU,
                         w32.NIN_POPUPOPEN):

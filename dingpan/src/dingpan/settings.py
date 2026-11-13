@@ -1009,20 +1009,21 @@ class SettingsWindow:
         mark = '[√]' if s.get('enabled', True) else '[  ]'
         return ('%s %s %s' % (mark, code, name)).strip()
 
-    def _checklist_index_at(self, y):
-        """客户区 y → 行号"""
+    def _checklist_index_at(self, hwnd, y):
+        """客户区 y → 实际数据行号（必须加列表滚动偏移 top，否则滚动后点错行）"""
         if y < 0:
             return -1
-        return int(y // self.ROW_H)
+        top = user32.SendMessageW(hwnd, 0x018E, 0, 0)    # LB_GETTOPINDEX
+        return top + int(y // self.ROW_H)
 
     # ---- 自绘（三列：复选框 / 文字 / 拖拽手柄）----
-    # 系统色索引
-    COLOR_WINDOW = 5
-    COLOR_WINDOWTEXT = 8
-    COLOR_HIGHLIGHT = 16
-    COLOR_HIGHLIGHTTEXT = 17
-    COLOR_3DDKSHADOW = 4
-    COLOR_GRAYTEXT = 17
+    # 系统色索引（必须严格对应 winuser.h 的 GetSysColor 序号，写错会导致看不见）
+    COLOR_WINDOW = 5           # 列表背景
+    COLOR_WINDOWTEXT = 8       # 普通文字
+    COLOR_HIGHLIGHT = 13       # 选中行高亮（系统强调色；原 16=BTNSHADOW 是灰的）
+    COLOR_HIGHLIGHTTEXT = 14   # 选中行文字（原 17=GRAYTEXT 是灰的）
+    COLOR_3DDKSHADOW = 21      # 复选框边框（原 4=COLOR_MENU，浅色主题下≈白 → 画在白列表上等于看不见）
+    COLOR_GRAYTEXT = 17         # 拖拽手柄（灰）
     DT_SINGLELINE = 0x0020
     DT_VCENTER = 0x0004
     TRANSPARENT = 1
@@ -1035,22 +1036,28 @@ class SettingsWindow:
             return 0x00000000
 
     def _draw_checkbox(self, dc, x, y, checked, color):
-        """画一个 12x12 的复选框（勾选时打勾）"""
+        """画一个 12x12 的复选框（勾选时打勾）。
+
+        ⚠️ 框用**画刷**（FrameRect 收 HBRUSH），勾用**画笔**（CreatePen 收 HPEN）——
+        旧实现把画刷当画笔 SelectObject 复用、且 FrameRect 后立即 DeleteObject 又复用
+        （use-after-free），导致勾选标记时有时无、颜色错乱。
+        """
         box = wintypes.RECT(x, y, x + 12, y + 12)
         gdi32.SetBkMode(dc, self.TRANSPARENT)
-        # 框线
-        pen = gdi32.CreateSolidBrush(color)
-        user32.FrameRect(dc, ctypes.byref(box), pen)
-        gdi32.DeleteObject(pen)
+        # 外框（画刷）
+        brush = gdi32.CreateSolidBrush(color)
+        user32.FrameRect(dc, ctypes.byref(box), brush)
+        gdi32.DeleteObject(brush)
         if not checked:
             return
-        # 打勾：两条短线（在 12x12 的框内居中）
-        old_pen = gdi32.SelectObject(dc, pen)
+        # 勾选标记：两条短线（画笔）
+        pen = gdi32.CreatePen(0, 1, color)   # PS_SOLID
+        old = gdi32.SelectObject(dc, pen)
         gdi32.MoveToEx(dc, x + 3, y + 6, None)
         gdi32.LineTo(dc, x + 5, y + 9)
         gdi32.MoveToEx(dc, x + 5, y + 9, None)
         gdi32.LineTo(dc, x + 9, y + 3)
-        gdi32.SelectObject(dc, old_pen)
+        gdi32.SelectObject(dc, old)
         gdi32.DeleteObject(pen)
 
 
@@ -1172,7 +1179,7 @@ class SettingsWindow:
             if msg == w32.WM_LBUTTONDOWN:
                 x = ctypes.c_short(lparam & 0xFFFF).value
                 y = ctypes.c_short((lparam >> 16) & 0xFFFF).value
-                idx = self._checklist_index_at(y)
+                idx = self._checklist_index_at(hwnd, y)
                 if 0 <= idx < len(self._checklist_rows(role)):
                     if x <= self.CHECKBOX_W:
                         # 点勾选标记 → 切换「显示 / 不显示」
@@ -1194,7 +1201,7 @@ class SettingsWindow:
                 y = ctypes.c_short((lparam >> 16) & 0xFFFF).value
                 if abs(y - drag['from_y']) > 4:
                     drag['moved'] = True
-                to = self._checklist_index_at(y)
+                to = self._checklist_index_at(hwnd, y)
                 if to != drag['to'] and 0 <= to < len(self._checklist_rows(role)):
                     drag['to'] = to
                     self._checklist_move(role, drag['row'], to)
